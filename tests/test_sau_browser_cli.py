@@ -15,6 +15,13 @@ class BrowserCliParserTests(unittest.TestCase):
         self.assertEqual(args.platform, "xiaohongshu")
         self.assertEqual(args.action, "login")
 
+    def test_upload_helpers_are_imported_for_platform_paths(self):
+        """上传路径依赖的平台初始化符号必须保持可用，避免拆分后回归。"""
+
+        self.assertTrue(hasattr(sau_cli, "douyin_setup"))
+        self.assertTrue(hasattr(sau_cli, "ks_setup"))
+        self.assertTrue(hasattr(sau_cli, "xiaohongshu_setup"))
+
     def test_douyin_upload_video_accepts_desc(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             video_path = Path(tmp_dir) / "demo.mp4"
@@ -169,11 +176,78 @@ class BrowserCliParserTests(unittest.TestCase):
 
 
 class BrowserCliDispatchTests(unittest.TestCase):
+    """覆盖浏览器类平台 CLI 的基础分发行为。"""
+
+    def test_dispatch_douyin_login_uses_platform_service(self):
+        args = Namespace(
+            platform="douyin",
+            action="login",
+            account="creator",
+            headless=False,
+        )
+        with patch(
+            "sau_cli_platform_bridge.platform_service.login",
+            new=AsyncMock(return_value={"success": True, "account_file": "cookies/douyin_creator.json"}),
+        ) as mock_login:
+            code = asyncio.run(sau_cli.dispatch(args))
+
+        self.assertEqual(code, 0)
+        request = mock_login.await_args.args[0]
+        self.assertEqual(request.platform, "douyin")
+        self.assertEqual(request.account_name, "creator")
+        self.assertFalse(request.headless)
+
+    def test_dispatch_douyin_check_uses_platform_service(self):
+        args = Namespace(platform="douyin", action="check", account="creator")
+        with patch("sau_cli_platform_bridge.platform_service.check", new=AsyncMock(return_value=True)) as mock_check:
+            code = asyncio.run(sau_cli.dispatch(args))
+
+        self.assertEqual(code, 0)
+        request = mock_check.await_args.args[0]
+        self.assertEqual(request.platform, "douyin")
+        self.assertEqual(request.account_name, "creator")
+
     def test_dispatch_xiaohongshu_check_prints_valid(self):
         args = Namespace(platform="xiaohongshu", action="check", account="creator")
-        with patch("sau_cli.check_xiaohongshu_account", new=AsyncMock(return_value=True)):
+        with patch("sau_cli_platform_bridge.platform_service.check", new=AsyncMock(return_value=True)):
             code = asyncio.run(sau_cli.dispatch(args))
         self.assertEqual(code, 0)
+
+    def test_dispatch_tencent_login_still_uses_local_helper(self):
+        """Tencent 登录暂不接入共享 service，避免越过当前任务边界。"""
+
+        args = Namespace(platform="tencent", action="login", account="creator", headless=True)
+
+        with patch(
+            "sau_cli_platform_bridge.platform_service.login",
+            new=AsyncMock(return_value={"success": True, "account_file": "x"}),
+        ) as mock_service_login, patch(
+            "sau_cli.login_tencent_account",
+            new=AsyncMock(return_value={"success": True, "account_file": "legacy"}),
+        ) as mock_local_login:
+            code = asyncio.run(sau_cli.dispatch(args))
+
+        self.assertEqual(code, 0)
+        mock_local_login.assert_awaited_once()
+        mock_service_login.assert_not_awaited()
+
+    def test_dispatch_tencent_check_still_uses_local_helper(self):
+        """Tencent 校验暂不接入共享 service，避免越过当前任务边界。"""
+
+        args = Namespace(platform="tencent", action="check", account="creator")
+
+        with patch(
+            "sau_cli_platform_bridge.platform_service.check",
+            new=AsyncMock(return_value=True),
+        ) as mock_service_check, patch(
+            "sau_cli.check_tencent_account",
+            new=AsyncMock(return_value=True),
+        ) as mock_local_check:
+            code = asyncio.run(sau_cli.dispatch(args))
+
+        self.assertEqual(code, 0)
+        mock_local_check.assert_awaited_once()
+        mock_service_check.assert_not_awaited()
 
     def test_dispatch_douyin_upload_note_uses_new_request_fields(self):
         args = Namespace(
@@ -289,6 +363,24 @@ class BrowserCliDispatchTests(unittest.TestCase):
         self.assertEqual(request.note, "图文正文")
         self.assertTrue(request.headless)
         self.assertEqual(len(request.image_files), 2)
+
+
+class SauCliServiceIntegrationTests(unittest.TestCase):
+    """验证 CLI 入口直接复用共享平台 service。"""
+
+    def test_dispatch_login_uses_platform_service(self):
+        """登录分发必须走共享 `platform_service`，避免 CLI 维护独立业务逻辑。"""
+
+        args = Namespace(platform="douyin", action="login", account="creator", headless=True)
+
+        with patch(
+            "sau_cli_platform_bridge.platform_service.login",
+            new=AsyncMock(return_value={"success": True, "account_file": "x"}),
+        ) as mock_login:
+            code = asyncio.run(sau_cli.dispatch(args))
+
+        self.assertEqual(code, 0)
+        mock_login.assert_awaited_once()
 
 
 if __name__ == "__main__":

@@ -7,6 +7,8 @@
 - `xiaohongshu`
 - `bilibili`
 
+另外，仓库也提供一个独立的 MCP HTTP 服务入口 `sau-mcp`，用于给 Agent 或其他客户端做能力探测、任务创建和事件订阅。
+
 实现说明：
 
 - `sau_cli.py` 是当前 CLI 的主入口和唯一主要实现文件
@@ -32,6 +34,12 @@ sau douyin --help
 sau kuaishou --help
 sau xiaohongshu --help
 sau bilibili --help
+```
+
+如果你要启动 MCP 服务，可以直接执行：
+
+```bash
+sau-mcp
 ```
 
 ## 安装 patchright 浏览器
@@ -97,6 +105,26 @@ sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --titl
 - 对可操作本地文件的 agent 来说，不要只把图片路径告诉用户
 - 这类二维码图片本身就是给用户扫码的，agent 应优先直接展示/发送本地图片给用户
 - Bilibili 当前不走这套本地二维码图片托管链路，登录按上面的 Bilibili CLI 说明处理即可
+
+## MCP HTTP 接口
+
+MCP 服务默认监听 `http://127.0.0.1:5410`，当前提供的核心接口如下：
+
+- `GET /mcp/health`
+- `GET /mcp/capabilities`
+- `POST /mcp/tasks`
+- `GET /mcp/tasks/<task_id>/events`
+
+说明：
+
+- `/mcp/capabilities` 只会返回当前真实支持的低层工具和平台列表，客户端应先调用它再发起任务
+- `/mcp/tasks/<task_id>/events` 以 `text/event-stream` 形式输出任务事件，适合前端或 Agent 订阅进度
+
+如果你需要改端口，可以设置：
+
+```bash
+SAU_MCP_PORT=5411 sau-mcp
+```
 
 ## 定时发布
 

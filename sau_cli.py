@@ -8,14 +8,27 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from conf import BASE_DIR
+from sau_cli_account_helpers import (
+    check_bilibili_account,
+    check_douyin_account,
+    check_kuaishou_account,
+    check_tencent_account,
+    check_xiaohongshu_account,
+    has_interactive_terminal,
+    login_bilibili_account,
+    login_douyin_account,
+    login_kuaishou_account,
+    login_tencent_account,
+    login_xiaohongshu_account,
+    resolve_account_file,
+)
+from sau_cli_platform_bridge import dispatch_platform_check, dispatch_platform_login
 from uploader.bilibili_uploader.runtime import run_biliup_command
 from uploader.douyin_uploader.main import (
     DOUYIN_PUBLISH_STRATEGY_IMMEDIATE,
     DOUYIN_PUBLISH_STRATEGY_SCHEDULED,
     DouYinNote,
     DouYinVideo,
-    cookie_auth as douyin_cookie_auth,
     douyin_setup,
 )
 from uploader.ks_uploader.main import (
@@ -23,14 +36,12 @@ from uploader.ks_uploader.main import (
     KUAISHOU_PUBLISH_STRATEGY_SCHEDULED,
     KSNote,
     KSVideo,
-    cookie_auth as kuaishou_cookie_auth,
     ks_setup,
 )
 from uploader.tencent_uploader.main import (
     TENCENT_PUBLISH_STRATEGY_IMMEDIATE,
     TENCENT_PUBLISH_STRATEGY_SCHEDULED,
     TencentVideo,
-    cookie_auth as tencent_cookie_auth,
     tencent_setup,
 )
 from uploader.xiaohongshu_uploader.main import (
@@ -38,7 +49,6 @@ from uploader.xiaohongshu_uploader.main import (
     XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED,
     XiaoHongShuNote,
     XiaoHongShuVideo,
-    cookie_auth as xiaohongshu_cookie_auth,
     xiaohongshu_setup,
 )
 
@@ -160,20 +170,6 @@ class TencentVideoUploadRequest:
     headless: bool = True
 
 
-def has_interactive_terminal() -> bool:
-    return sys.stdin.isatty() and sys.stdout.isatty()
-
-
-def resolve_runtime_home() -> Path:
-    return Path(BASE_DIR)
-
-
-def resolve_account_file(platform: str, account_name: str) -> Path:
-    account_file = resolve_runtime_home() / "cookies" / f"{platform}_{account_name}.json"
-    account_file.parent.mkdir(exist_ok=True)
-    return account_file
-
-
 def parse_tags(raw_tags: str | None) -> list[str]:
     if not raw_tags:
         return []
@@ -194,84 +190,6 @@ def parse_schedule(raw_schedule: str | None) -> datetime | int:
     if not raw_schedule:
         return 0
     return datetime.strptime(raw_schedule, SCHEDULE_FORMAT)
-
-
-async def login_douyin_account(account_name: str, headless: bool = True) -> dict:
-    account_file = resolve_account_file("douyin", account_name)
-    return await douyin_setup(str(account_file), handle=True, return_detail=True, headless=headless)
-
-
-async def check_douyin_account(account_name: str) -> bool:
-    account_file = resolve_account_file("douyin", account_name)
-    if not account_file.exists():
-        return False
-    return await douyin_cookie_auth(str(account_file))
-
-
-async def login_kuaishou_account(account_name: str, headless: bool = True) -> dict:
-    account_file = resolve_account_file("kuaishou", account_name)
-    return await ks_setup(str(account_file), handle=True, return_detail=True, headless=headless)
-
-
-async def check_kuaishou_account(account_name: str) -> bool:
-    account_file = resolve_account_file("kuaishou", account_name)
-    if not account_file.exists():
-        return False
-    return await kuaishou_cookie_auth(str(account_file))
-
-
-async def login_xiaohongshu_account(account_name: str, headless: bool = True) -> dict:
-    account_file = resolve_account_file("xiaohongshu", account_name)
-    return await xiaohongshu_setup(str(account_file), handle=True, return_detail=True, headless=headless)
-
-
-async def check_xiaohongshu_account(account_name: str) -> bool:
-    account_file = resolve_account_file("xiaohongshu", account_name)
-    if not account_file.exists():
-        return False
-    return await xiaohongshu_cookie_auth(str(account_file))
-
-
-async def login_bilibili_account(account_name: str) -> dict:
-    account_file = resolve_account_file("bilibili", account_name)
-    if not has_interactive_terminal():
-        return {
-            "success": False,
-            "message": (
-                "Bilibili login requires a local interactive terminal. "
-                f"Please run `sau bilibili login --account {account_name}` yourself in a local terminal. "
-                "If the terminal QR code does not render completely, open `./qrcode.png` and scan that image."
-            ),
-            "account_file": str(account_file),
-        }
-
-    result = run_biliup_command(["-u", str(account_file), "login"], interactive=True)
-    success = result.returncode == 0
-    return {
-        "success": success,
-        "message": (result.stderr or result.stdout or "").strip() or "Bilibili login completed" if success else (result.stderr or result.stdout or "").strip() or "Bilibili login failed",
-        "account_file": str(account_file),
-    }
-
-
-async def check_bilibili_account(account_name: str) -> bool:
-    account_file = resolve_account_file("bilibili", account_name)
-    if not account_file.exists():
-        return False
-    result = run_biliup_command(["-u", str(account_file), "renew"])
-    return result.returncode == 0
-
-
-async def login_tencent_account(account_name: str, headless: bool = True) -> dict:
-    account_file = resolve_account_file("tencent", account_name)
-    return await tencent_setup(str(account_file), handle=True, return_detail=True, headless=headless)
-
-
-async def check_tencent_account(account_name: str) -> bool:
-    account_file = resolve_account_file("tencent", account_name)
-    if not account_file.exists():
-        return False
-    return await tencent_cookie_auth(str(account_file))
 
 
 async def upload_video(request: DouyinVideoUploadRequest) -> Path:
@@ -652,16 +570,11 @@ def build_parser() -> argparse.ArgumentParser:
 async def dispatch(args: argparse.Namespace) -> int:
     if args.platform == "douyin":
         if args.action == "login":
-            result = await login_douyin_account(args.account, headless=args.headless)
-            if not result["success"]:
-                raise RuntimeError(result["message"])
-            print(f"Douyin login flow completed: {result['account_file']}")
-            return 0
+            # 登录与校验统一交给共享 service，CLI 只保留参数入口和结果输出。
+            return await dispatch_platform_login("douyin", "Douyin", args.account, getattr(args, "headless", True))
 
         if args.action == "check":
-            is_valid = await check_douyin_account(args.account)
-            print("valid" if is_valid else "invalid")
-            return 0 if is_valid else 1
+            return await dispatch_platform_check("douyin", args.account)
 
         publish_strategy = DOUYIN_PUBLISH_STRATEGY_SCHEDULED if args.schedule else DOUYIN_PUBLISH_STRATEGY_IMMEDIATE
 
@@ -706,16 +619,10 @@ async def dispatch(args: argparse.Namespace) -> int:
 
     if args.platform == "kuaishou":
         if args.action == "login":
-            result = await login_kuaishou_account(args.account, headless=args.headless)
-            if not result["success"]:
-                raise RuntimeError(result["message"])
-            print(f"Kuaishou login flow completed: {result['account_file']}")
-            return 0
+            return await dispatch_platform_login("kuaishou", "Kuaishou", args.account, getattr(args, "headless", True))
 
         if args.action == "check":
-            is_valid = await check_kuaishou_account(args.account)
-            print("valid" if is_valid else "invalid")
-            return 0 if is_valid else 1
+            return await dispatch_platform_check("kuaishou", args.account)
 
         publish_strategy = KUAISHOU_PUBLISH_STRATEGY_SCHEDULED if args.schedule else KUAISHOU_PUBLISH_STRATEGY_IMMEDIATE
 
@@ -756,16 +663,12 @@ async def dispatch(args: argparse.Namespace) -> int:
 
     if args.platform == "xiaohongshu":
         if args.action == "login":
-            result = await login_xiaohongshu_account(args.account, headless=args.headless)
-            if not result["success"]:
-                raise RuntimeError(result["message"])
-            print(f"Xiaohongshu login flow completed: {result['account_file']}")
-            return 0
+            return await dispatch_platform_login(
+                "xiaohongshu", "Xiaohongshu", args.account, getattr(args, "headless", True)
+            )
 
         if args.action == "check":
-            is_valid = await check_xiaohongshu_account(args.account)
-            print("valid" if is_valid else "invalid")
-            return 0 if is_valid else 1
+            return await dispatch_platform_check("xiaohongshu", args.account)
 
         publish_strategy = (
             XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED if args.schedule else XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE
@@ -808,16 +711,10 @@ async def dispatch(args: argparse.Namespace) -> int:
 
     if args.platform == "bilibili":
         if args.action == "login":
-            result = await login_bilibili_account(args.account)
-            if not result["success"]:
-                raise RuntimeError(result["message"])
-            print(f"Bilibili login flow completed: {result['account_file']}")
-            return 0
+            return await dispatch_platform_login("bilibili", "Bilibili", args.account, getattr(args, "headless", True))
 
         if args.action == "check":
-            is_valid = await check_bilibili_account(args.account)
-            print("valid" if is_valid else "invalid")
-            return 0 if is_valid else 1
+            return await dispatch_platform_check("bilibili", args.account)
 
         if args.action == "upload-video":
             request = BilibiliVideoUploadRequest(
@@ -837,7 +734,8 @@ async def dispatch(args: argparse.Namespace) -> int:
 
     if args.platform == "tencent":
         if args.action == "login":
-            result = await login_tencent_account(args.account, headless=args.headless)
+            # 当前阶段还没把 Tencent 接进共享 service，先保留本地直调，避免越过边界。
+            result = await login_tencent_account(args.account, headless=getattr(args, "headless", True))
             if not result["success"]:
                 raise RuntimeError(result["message"])
             print(f"Tencent/WeChat Channels login flow completed: {result['account_file']}")

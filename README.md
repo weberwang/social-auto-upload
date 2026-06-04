@@ -74,6 +74,27 @@
 在你使用AI的能力，browser agent等等，每次都让 agent 重新解析网页、截图理解, 临场判断
 该项目经过大量验证，上传这种 高频，重复，无聊的工作交给脚本和程序去执行
 
+## MCP Server
+
+仓库现在额外提供一套本地 MCP HTTP 服务，适合给 Agent 或其他客户端做统一能力探测和任务提交流程。
+
+启动服务：
+
+```bash
+sau-mcp
+```
+
+常用接口：
+
+- `GET /mcp/health`
+- `GET /mcp/capabilities`
+- `POST /mcp/tasks`
+- `GET /mcp/tasks/<task_id>/events`
+
+其中 `/mcp/capabilities` 会返回当前真实支持的工具和平台列表，`/mcp/tasks/<task_id>/events` 会以 SSE 格式输出任务历史事件。
+
+默认端口是 `5410`，也可以通过环境变量 `SAU_MCP_PORT` 和 `SAU_MCP_HOST` 覆盖。
+
 
 ## 💾安装指南
 
