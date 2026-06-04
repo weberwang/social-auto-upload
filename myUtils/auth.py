@@ -1,18 +1,49 @@
 import asyncio
 import configparser
 import os
+from pathlib import Path
+from typing import Awaitable, Callable
 
-from playwright.async_api import async_playwright
+from playwright.async_api import Error as PlaywrightError, async_playwright
 from xhs import XhsClient
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS
 from utils.base_social_media import set_init_script
-from utils.log import tencent_logger, kuaishou_logger, douyin_logger
-from pathlib import Path
+from utils.log import tencent_logger, kuaishou_logger, douyin_logger, xhs_logger
 from uploader.xhs_uploader.main import sign_local
 
 
+def _is_missing_playwright_browser_error(error: PlaywrightError) -> bool:
+    """判断是否因为本机未安装 Playwright 浏览器而导致启动失败。"""
+    message = str(error)
+    return "Executable doesn't exist" in message and (
+        "ms-playwright" in message
+        or "headless_shell" in message
+        or "chrome-win" in message
+    )
+
+
+async def _run_cookie_validator(
+    validator: Callable[[Path], Awaitable[bool]],
+    account_file: Path,
+    logger,
+    platform_name: str,
+) -> bool:
+    """执行单个平台 Cookie 校验，并把浏览器缺失降级成可控失败。"""
+    try:
+        return await validator(account_file)
+    except PlaywrightError as error:
+        if _is_missing_playwright_browser_error(error):
+            # 这里返回 False 而不是继续抛异常，避免账号列表接口因为本机环境未初始化直接 500。
+            logger.error(
+                f"[+] {platform_name} Cookie 校验失败：未找到 Playwright 浏览器，请先执行 `playwright install chromium`"
+            )
+            return False
+        raise
+
+
 async def cookie_auth_douyin(account_file):
+    """校验抖音账号 Cookie 是否仍然有效。"""
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS)
         context = await browser.new_context(storage_state=account_file)
@@ -41,6 +72,7 @@ async def cookie_auth_douyin(account_file):
 
 
 async def cookie_auth_tencent(account_file):
+    """校验微信视频号账号 Cookie 是否仍然有效。"""
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS)
         context = await browser.new_context(storage_state=account_file)
@@ -59,6 +91,7 @@ async def cookie_auth_tencent(account_file):
 
 
 async def cookie_auth_ks(account_file):
+    """校验快手账号 Cookie 是否仍然有效。"""
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS)
         context = await browser.new_context(storage_state=account_file)
@@ -78,6 +111,7 @@ async def cookie_auth_ks(account_file):
 
 
 async def cookie_auth_xhs(account_file):
+    """校验小红书账号 Cookie 是否仍然有效。"""
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS)
         context = await browser.new_context(storage_state=account_file)
@@ -103,19 +137,21 @@ async def cookie_auth_xhs(account_file):
 
 
 async def check_cookie(type, file_path):
+    """按平台类型分发 Cookie 校验逻辑。"""
+    account_file = Path(BASE_DIR / "cookiesFile" / file_path)
     match type:
         # 小红书
         case 1:
-            return await cookie_auth_xhs(Path(BASE_DIR / "cookiesFile" / file_path))
+            return await _run_cookie_validator(cookie_auth_xhs, account_file, xhs_logger, "小红书")
         # 视频号
         case 2:
-            return await cookie_auth_tencent(Path(BASE_DIR / "cookiesFile" / file_path))
+            return await _run_cookie_validator(cookie_auth_tencent, account_file, tencent_logger, "视频号")
         # 抖音
         case 3:
-            return await cookie_auth_douyin(Path(BASE_DIR / "cookiesFile" / file_path))
+            return await _run_cookie_validator(cookie_auth_douyin, account_file, douyin_logger, "抖音")
         # 快手
         case 4:
-            return await cookie_auth_ks(Path(BASE_DIR / "cookiesFile" / file_path))
+            return await _run_cookie_validator(cookie_auth_ks, account_file, kuaishou_logger, "快手")
         case _:
             return False
 

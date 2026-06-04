@@ -26,6 +26,15 @@ app.config['MAX_CONTENT_LENGTH'] = 160 * 1024 * 1024
 # 获取当前目录（假设 index.html 和 assets 在这里）
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
+
+def get_video_storage_dir(create: bool = False) -> Path:
+    """返回视频上传目录，并在需要写入时按需创建目录。"""
+    video_dir = Path(BASE_DIR / "videoFile")
+    if create:
+        # 前端上传接口依赖该目录存在，启动脚本未准备目录时在这里兜底创建。
+        video_dir.mkdir(parents=True, exist_ok=True)
+    return video_dir
+
 # 处理所有静态资源请求（未来打包用）
 @app.route('/assets/<filename>')
 def custom_static(filename):
@@ -47,6 +56,7 @@ def index():  # put application's code here
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    """接收单个文件上传，并返回可用于后续发布的文件标识。"""
     if 'file' not in request.files:
         return jsonify({
             "code": 400,
@@ -67,7 +77,7 @@ def upload_file():
         safe_name = secure_filename(file.filename)
         if not safe_name:
             return jsonify({"code": 400, "data": None, "msg": "Invalid filename"}), 400
-        filepath = Path(BASE_DIR / "videoFile" / f"{uuid_v1}_{safe_name}")
+        filepath = get_video_storage_dir(create=True) / f"{uuid_v1}_{safe_name}"
         file.save(filepath)
         return jsonify({"code":200,"msg": "File uploaded successfully", "data": f"{uuid_v1}_{safe_name}"}), 200
     except Exception as e:
@@ -75,6 +85,7 @@ def upload_file():
 
 @app.route('/getFile', methods=['GET'])
 def get_file():
+    """按文件名返回已上传的视频文件。"""
     # 获取 filename 参数
     filename = request.args.get('filename')
 
@@ -86,7 +97,7 @@ def get_file():
         return jsonify({"code": 400, "msg": "Invalid filename", "data": None}), 400
 
     # 拼接完整路径
-    file_path = str(Path(BASE_DIR / "videoFile"))
+    file_path = str(get_video_storage_dir())
 
     # 返回文件
     return send_from_directory(file_path,filename)
@@ -94,6 +105,7 @@ def get_file():
 
 @app.route('/uploadSave', methods=['POST'])
 def upload_save():
+    """上传文件并同步写入文件记录表。"""
     if 'file' not in request.files:
         return jsonify({
             "code": 400,
@@ -125,7 +137,7 @@ def upload_save():
 
         # 构造文件名和路径
         final_filename = f"{uuid_v1}_{filename}"
-        filepath = Path(BASE_DIR / "videoFile" / f"{uuid_v1}_{filename}")
+        filepath = get_video_storage_dir(create=True) / final_filename
 
         # 保存文件
         file.save(filepath)
@@ -260,6 +272,7 @@ async def getValidAccounts():
 
 @app.route('/deleteFile', methods=['GET'])
 def delete_file():
+    """删除文件记录，并尽量同步清理磁盘上的实际文件。"""
     file_id = request.args.get('id')
 
     if not file_id or not file_id.isdigit():
@@ -289,7 +302,7 @@ def delete_file():
             record = dict(record)
 
             # 获取文件路径并删除实际文件
-            file_path = Path(BASE_DIR / "videoFile" / record['file_path'])
+            file_path = get_video_storage_dir() / record['file_path']
             if file_path.exists():
                 try:
                     file_path.unlink()  # 删除文件
