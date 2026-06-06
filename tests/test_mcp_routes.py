@@ -38,6 +38,27 @@ class McpRouteTests(unittest.TestCase):
             payload["platforms"],
             ["douyin", "kuaishou", "xiaohongshu", "bilibili"],
         )
+        self.assertEqual(
+            payload["platform_details"],
+            {
+                "douyin": {
+                    "display_name": "抖音",
+                    "supported_material_types": ["video", "image_text"],
+                },
+                "kuaishou": {
+                    "display_name": "快手",
+                    "supported_material_types": ["video", "image_text"],
+                },
+                "xiaohongshu": {
+                    "display_name": "小红书",
+                    "supported_material_types": ["video", "image_text"],
+                },
+                "bilibili": {
+                    "display_name": "B站",
+                    "supported_material_types": ["video"],
+                },
+            },
+        )
 
 
 class McpTaskCreationTests(unittest.TestCase):

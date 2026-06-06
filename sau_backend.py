@@ -8,11 +8,12 @@ from pathlib import Path
 from queue import Queue
 from flask_cors import CORS
 from myUtils.auth import check_cookie
-from flask import Flask, request, jsonify, Response, render_template, send_from_directory
+from flask import Flask, request, jsonify, Response, render_template, send_from_directory, g
 from werkzeug.utils import secure_filename
 from conf import BASE_DIR
-from myUtils.login import get_tencent_cookie, douyin_cookie_gen, get_ks_cookie, xiaohongshu_cookie_gen
-from myUtils.postVideo import post_video_tencent, post_video_DouYin, post_video_ks, post_video_xhs
+from myUtils.login import bilibili_cookie_gen, get_tencent_cookie, douyin_cookie_gen, get_ks_cookie, xiaohongshu_cookie_gen
+from myUtils.web_publish import PublishRequestError, dispatch_web_publish_request, parse_web_publish_request
+from utils.log import bilibili_logger
 
 active_queues = {}
 app = Flask(__name__)
@@ -25,6 +26,28 @@ app.config['MAX_CONTENT_LENGTH'] = 160 * 1024 * 1024
 
 # 获取当前目录（假设 index.html 和 assets 在这里）
 current_dir = os.path.dirname(os.path.abspath(__file__))
+
+
+@app.before_request
+def record_request_start_time():
+    """记录请求开始时间，供统一访问日志计算耗时。"""
+    g.request_started_at = time.perf_counter()
+
+
+@app.after_request
+def log_request_summary(response):
+    """输出统一访问日志，确保非 debug 模式下也能看到请求明细。"""
+    started_at = getattr(g, "request_started_at", None)
+    duration_ms = 0.0
+    if started_at is not None:
+        # 使用高精度计时器统计请求耗时，避免受系统时钟调整影响。
+        duration_ms = (time.perf_counter() - started_at) * 1000
+
+    print(
+        f"[REQ] {request.method} {request.path} -> {response.status_code} {duration_ms:.1f}ms",
+        flush=True,
+    )
+    return response
 
 
 def get_video_storage_dir(create: bool = False) -> Path:
@@ -396,7 +419,7 @@ def delete_account():
 # SSE 登录接口
 @app.route('/login')
 def login():
-    # 1 小红书 2 视频号 3 抖音 4 快手
+    # 1 小红书 2 视频号 3 抖音 4 快手 5 B站
     type = request.args.get('type')
     # 账号名
     id = request.args.get('id')
@@ -420,69 +443,23 @@ def login():
 
 @app.route('/postVideo', methods=['POST'])
 def postVideo():
-    # 获取JSON数据
-    data = request.get_json()
-
-    if not data:
-        return jsonify({"code": 400, "msg": "请求数据不能为空", "data": None}), 400
-
-    # 从JSON数据中提取fileList和accountList
-    file_list = data.get('fileList', [])
-    account_list = data.get('accountList', [])
-    type = data.get('type')
-    title = data.get('title')
-    tags = data.get('tags')
-    category = data.get('category')
-    enableTimer = data.get('enableTimer')
-    if category == 0:
-        category = None
-    productLink = data.get('productLink', '')
-    productTitle = data.get('productTitle', '')
-    thumbnail_path = data.get('thumbnail', '')
-    is_draft = data.get('isDraft', False)  # 新增参数：是否保存为草稿
-
-    videos_per_day = data.get('videosPerDay')
-    daily_times = data.get('dailyTimes')
-    start_days = data.get('startDays')
-
-    # 参数校验
-    if not file_list:
-        return jsonify({"code": 400, "msg": "文件列表不能为空", "data": None}), 400
-    if not account_list:
-        return jsonify({"code": 400, "msg": "账号列表不能为空", "data": None}), 400
-    if not type:
-        return jsonify({"code": 400, "msg": "平台类型不能为空", "data": None}), 400
-    if not title:
-        return jsonify({"code": 400, "msg": "标题不能为空", "data": None}), 400
-
-    # 打印获取到的数据（仅作为示例）
-    print("File List:", file_list)
-    print("Account List:", account_list)
-
     try:
-        match type:
-            case 1:
-                post_video_xhs(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                                   start_days)
-            case 2:
-                post_video_tencent(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                                   start_days, is_draft)
-            case 3:
-                post_video_DouYin(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                          start_days, thumbnail_path, productLink, productTitle)
-            case 4:
-                post_video_ks(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                          start_days)
-            case _:
-                return jsonify({"code": 400, "msg": f"不支持的平台类型: {type}", "data": None}), 400
-
-        # 返回响应给客户端
+        publish_request = parse_web_publish_request(request.get_json())
+        print("File List:", list(publish_request.file_list))
+        print("Account List:", list(publish_request.account_list))
+        dispatch_web_publish_request(publish_request)
         return jsonify(
             {
                 "code": 200,
                 "msg": "发布任务已提交",
                 "data": None
             }), 200
+    except PublishRequestError as e:
+        return jsonify({
+            "code": 400,
+            "msg": str(e),
+            "data": None
+        }), 400
     except Exception as e:
         print(f"发布视频时出错: {str(e)}")
         return jsonify({
@@ -535,40 +512,14 @@ def postVideoBatch():
 
     if not isinstance(data_list, list):
         return jsonify({"code": 400, "msg": "Expected a JSON array", "data": None}), 400
-    for data in data_list:
-        # 从JSON数据中提取fileList和accountList
-        file_list = data.get('fileList', [])
-        account_list = data.get('accountList', [])
-        type = data.get('type')
-        title = data.get('title')
-        tags = data.get('tags')
-        category = data.get('category')
-        enableTimer = data.get('enableTimer')
-        if category == 0:
-            category = None
-        productLink = data.get('productLink', '')
-        productTitle = data.get('productTitle', '')
-        is_draft = data.get('isDraft', False)
-
-        videos_per_day = data.get('videosPerDay')
-        daily_times = data.get('dailyTimes')
-        start_days = data.get('startDays')
-        # 打印获取到的数据（仅作为示例）
-        print("File List:", file_list)
-        print("Account List:", account_list)
-        match type:
-            case 1:
-                post_video_xhs(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                               start_days)
-            case 2:
-                post_video_tencent(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                                   start_days, is_draft)
-            case 3:
-                post_video_DouYin(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                          start_days, productLink, productTitle)
-            case 4:
-                post_video_ks(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                          start_days)
+    try:
+        for data in data_list:
+            publish_request = parse_web_publish_request(data)
+            print("File List:", list(publish_request.file_list))
+            print("Account List:", list(publish_request.account_list))
+            dispatch_web_publish_request(publish_request)
+    except PublishRequestError as e:
+        return jsonify({"code": 400, "msg": str(e), "data": None}), 400
     # 返回响应给客户端
     return jsonify(
         {
@@ -700,27 +651,38 @@ def download_cookie():
 
 # 包装函数：在线程中运行异步函数
 def run_async_function(type,id,status_queue):
-    match type:
-        case '1':
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(xiaohongshu_cookie_gen(id, status_queue))
-            loop.close()
-        case '2':
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(get_tencent_cookie(id,status_queue))
-            loop.close()
-        case '3':
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(douyin_cookie_gen(id,status_queue))
-            loop.close()
-        case '4':
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(get_ks_cookie(id,status_queue))
-            loop.close()
+    try:
+        match type:
+            case '1':
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(xiaohongshu_cookie_gen(id, status_queue))
+                loop.close()
+            case '2':
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(get_tencent_cookie(id,status_queue))
+                loop.close()
+            case '3':
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(douyin_cookie_gen(id,status_queue))
+                loop.close()
+            case '4':
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(get_ks_cookie(id,status_queue))
+                loop.close()
+            case '5':
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(bilibili_cookie_gen(id, status_queue))
+                loop.close()
+    except Exception as exc:
+        # 线程内异常如果不兜底，前端只能看到超时或空白，这里统一落日志并回传摘要。
+        bilibili_logger.exception(f"历史 Web 登录线程异常，平台类型={type}，账号名={id}，错误={exc}")
+        status_queue.put(f"ERROR:登录线程异常：{exc}")
+        status_queue.put("500")
 
 # SSE 流生成器函数
 def sse_stream(status_queue):

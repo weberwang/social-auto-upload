@@ -53,6 +53,9 @@
                 <el-tooltip content="小红书账号" placement="top">
                   <el-tag size="small" type="info">{{ platformStats.xiaohongshu }}</el-tag>
                 </el-tooltip>
+                <el-tooltip content="B站账号" placement="top">
+                  <el-tag size="small" :type="ACCOUNT_PLATFORM_TAG_TYPE_MAP['B站']">{{ platformStats.bilibili }}</el-tag>
+                </el-tooltip>
               </div>
             </div>
           </el-card>
@@ -100,7 +103,7 @@
                 <el-icon><Upload /></el-icon>
               </div>
               <div class="action-title">素材管理</div>
-              <div class="action-desc">上传和管理视频素材</div>
+              <div class="action-desc">上传和管理视频、图片素材</div>
             </el-card>
           </el-col>
           <el-col :span="6">
@@ -159,7 +162,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   User, UserFilled, Platform, Document,
@@ -169,13 +172,22 @@ import { accountApi } from '@/api/account'
 import { materialApi } from '@/api/material'
 import { useAccountStore } from '@/stores/account'
 import { useAppStore } from '@/stores/app'
+import { ACCOUNT_PLATFORM_TAG_TYPE_MAP } from '@/constants/accountPlatforms'
+import {
+  getMaterialType,
+  getMaterialTypeTag,
+  isImageMaterial,
+  isVideoMaterial
+} from '@/constants/materialFormats'
 
 const router = useRouter()
 const accountStore = useAccountStore()
 const appStore = useAppStore()
 const loading = ref(false)
 
-// 账号统计数据 - 从真实数据计算
+/**
+ * 账号统计数据直接基于当前前端缓存计算，避免再维护一份独立状态。
+ */
 const accountStats = computed(() => {
   const accounts = accountStore.accounts
   const normal = accounts.filter(a => a.status === '正常').length
@@ -187,26 +199,24 @@ const accountStats = computed(() => {
   }
 })
 
-// 平台统计数据 - 从真实数据计算
+/**
+ * 仪表盘平台统计与账号管理页共用同一套平台名称约定，避免 B 站这类新增平台再次漏统计。
+ */
 const platformStats = computed(() => {
   const accounts = accountStore.accounts
   const kuaishou = accounts.filter(a => a.platform === '快手').length
   const douyin = accounts.filter(a => a.platform === '抖音').length
   const channels = accounts.filter(a => a.platform === '视频号').length
   const xiaohongshu = accounts.filter(a => a.platform === '小红书').length
-  // 统计有账号的平台数量
-  const total = [kuaishou, douyin, channels, xiaohongshu].filter(n => n > 0).length
-  return { total, kuaishou, douyin, channels, xiaohongshu }
+  const bilibili = accounts.filter(a => a.platform === 'B站').length
+  const total = [kuaishou, douyin, channels, xiaohongshu, bilibili].filter(n => n > 0).length
+  return { total, kuaishou, douyin, channels, xiaohongshu, bilibili }
 })
-
-// 素材统计数据 - 从真实数据计算
-const videoExtensions = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv']
-const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
 
 const contentStats = computed(() => {
   const materials = appStore.materials
-  const videos = materials.filter(m => videoExtensions.some(ext => m.filename.toLowerCase().endsWith(ext))).length
-  const images = materials.filter(m => imageExtensions.some(ext => m.filename.toLowerCase().endsWith(ext))).length
+  const videos = materials.filter((material) => isVideoMaterial(material.filename)).length
+  const images = materials.filter((material) => isImageMaterial(material.filename)).length
   return {
     total: materials.length,
     videos,
@@ -222,18 +232,15 @@ const recentMaterials = computed(() => {
     .slice(0, 5)
 })
 
-// 获取文件类型
-const getFileType = (filename) => {
-  if (videoExtensions.some(ext => filename.toLowerCase().endsWith(ext))) return '视频'
-  if (imageExtensions.some(ext => filename.toLowerCase().endsWith(ext))) return '图片'
-  return '其他'
-}
+/**
+ * 最近素材列表沿用统一素材类型判断，避免不同页面对同一文件给出不同结果。
+ */
+const getFileType = getMaterialType
 
-// 获取文件类型标签颜色
-const getFileTypeTag = (filename) => {
-  const type = getFileType(filename)
-  return { '视频': 'success', '图片': 'warning', '其他': 'info' }[type] || 'info'
-}
+/**
+ * 模板仍然使用 `getFileTypeTag` 命名，这里显式桥接到共享实现，避免列表渲染期访问未定义函数。
+ */
+const getFileTypeTag = getMaterialTypeTag
 
 // 导航到指定路由
 const navigateTo = (path) => {

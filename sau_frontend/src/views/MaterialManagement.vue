@@ -27,6 +27,13 @@
         <el-table :data="filteredMaterials" style="width: 100%">
           <el-table-column prop="uuid" label="UUID" width="180" />
           <el-table-column prop="filename" label="文件名" width="300" />
+          <el-table-column label="类型" width="110">
+            <template #default="scope">
+              <el-tag :type="getFileTypeTag(scope.row.filename)" effect="plain" size="small">
+                {{ getFileType(scope.row.filename) }}
+              </el-tag>
+            </template>
+          </el-table-column>
           <el-table-column prop="filesize" label="文件大小" width="120">
             <template #default="scope">
               {{ scope.row.filesize }} MB
@@ -80,7 +87,8 @@
               </div>
               <template #tip>
                 <div class="el-upload__tip">
-                  支持视频、图片等格式文件，可一次选择多个文件
+                  支持视频与图片素材，可一次选择多个文件。
+                  视频格式：{{ VIDEO_FILE_FORMAT_TEXT }}；图片格式：{{ IMAGE_FILE_FORMAT_TEXT }}
                 </div>
               </template>
             </el-upload>
@@ -146,6 +154,14 @@ import { Refresh, Upload } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { materialApi } from '@/api/material'
 import { useAppStore } from '@/stores/app'
+import {
+  IMAGE_FILE_FORMAT_TEXT,
+  VIDEO_FILE_FORMAT_TEXT,
+  getMaterialType,
+  getMaterialTypeTag,
+  isImageMaterial,
+  isVideoMaterial
+} from '@/constants/materialFormats'
 
 // 获取应用状态管理
 const appStore = useAppStore()
@@ -373,15 +389,25 @@ const downloadFile = (material) => {
 }
 
 // 判断文件类型
-const isVideoFile = (filename) => {
-  const videoExtensions = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv']
-  return videoExtensions.some(ext => filename.toLowerCase().endsWith(ext))
-}
+/**
+ * 素材管理页复用共享格式判断，确保上传提示、列表标签和预览分支口径一致。
+ */
+const isVideoFile = isVideoMaterial
 
-const isImageFile = (filename) => {
-  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
-  return imageExtensions.some(ext => filename.toLowerCase().endsWith(ext))
-}
+/**
+ * 图片预览与统计共用统一识别逻辑，避免后续扩展格式时漏改页面。
+ */
+const isImageFile = isImageMaterial
+
+/**
+ * 返回素材展示类型，供表格直接渲染标签。
+ */
+const getFileType = getMaterialType
+
+/**
+ * 列表标签颜色统一走共享实现，避免模板访问未定义函数导致整页渲染中断。
+ */
+const getFileTypeTag = getMaterialTypeTag
 
 // 组件挂载时获取素材列表
 onMounted(() => {
