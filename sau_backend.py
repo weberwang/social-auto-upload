@@ -108,7 +108,7 @@ def upload_file():
 
 @app.route('/getFile', methods=['GET'])
 def get_file():
-    """按文件名返回已上传的视频文件。"""
+    """按文件名返回已上传素材，供前端直接预览。"""
     # 获取 filename 参数
     filename = request.args.get('filename')
 
@@ -124,6 +124,18 @@ def get_file():
 
     # 返回文件
     return send_from_directory(file_path,filename)
+
+
+@app.route('/download/<path:filename>', methods=['GET'])
+def download_file(filename):
+    """按文件名下载已上传素材，供预览弹窗回退到本地下载。"""
+    if not filename:
+        return jsonify({"code": 400, "msg": "filename is required", "data": None}), 400
+
+    if '..' in filename or filename.startswith('/'):
+        return jsonify({"code": 400, "msg": "Invalid filename", "data": None}), 400
+
+    return send_from_directory(str(get_video_storage_dir()), filename, as_attachment=True)
 
 
 @app.route('/uploadSave', methods=['POST'])

@@ -68,6 +68,20 @@ class UploadEndpointTests(unittest.TestCase):
 
         self.assertEqual(record, ("renamed-video.mp4", payload["data"]["filepath"]))
 
+    def test_download_material_returns_attachment_response(self):
+        """素材下载接口应以附件形式返回已上传文件，供预览弹窗回退下载。"""
+        file_name = "preview.txt"
+        material_dir = self.base_dir / "videoFile"
+        material_dir.mkdir(parents=True, exist_ok=True)
+        (material_dir / file_name).write_text("preview content", encoding="utf-8")
+
+        with patch("sau_backend.BASE_DIR", self.base_dir):
+            response = self.client.get(f"/download/{file_name}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment", response.headers.get("Content-Disposition", ""))
+        self.assertEqual(response.data, b"preview content")
+
     def _prepare_database(self):
         """构造测试所需的最小数据库结构，避免依赖真实环境数据。"""
         db_dir = self.base_dir / "db"

@@ -120,31 +120,10 @@
       </template>
     </el-dialog>
     
-    <!-- 预览对话框 -->
-    <el-dialog
+    <MaterialPreviewDialog
       v-model="previewDialogVisible"
-      title="素材预览"
-      width="50%"
-      :top="'10vh'"
-    >
-      <div class="preview-container" v-if="currentMaterial">
-        <div v-if="isVideoFile(currentMaterial.filename)" class="video-preview">
-          <video controls style="max-width: 100%; max-height: 60vh;">
-            <source :src="getPreviewUrl(currentMaterial.file_path)" type="video/mp4">
-            您的浏览器不支持视频播放
-          </video>
-        </div>
-        <div v-else-if="isImageFile(currentMaterial.filename)" class="image-preview">
-          <img :src="getPreviewUrl(currentMaterial.file_path)" style="max-width: 100%; max-height: 60vh;" />
-        </div>
-        <div v-else class="file-info">
-          <p>文件名: {{ currentMaterial.filename }}</p>
-          <p>文件大小: {{ currentMaterial.filesize }} MB</p>
-          <p>上传时间: {{ currentMaterial.upload_time }}</p>
-          <el-button type="primary" @click="downloadFile(currentMaterial)">下载文件</el-button>
-        </div>
-      </div>
-    </el-dialog>
+      :material="currentMaterial"
+    />
   </div>
 </template>
 
@@ -153,6 +132,8 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { Refresh, Upload } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { materialApi } from '@/api/material'
+import MaterialPreviewDialog from '@/components/MaterialPreviewDialog.vue'
+import { useMaterialPreviewDialog } from '@/composables/useMaterialPreviewDialog.js'
 import { useAppStore } from '@/stores/app'
 import {
   IMAGE_FILE_FORMAT_TEXT,
@@ -173,8 +154,11 @@ const isUploading = ref(false)
 
 // 对话框控制
 const uploadDialogVisible = ref(false)
-const previewDialogVisible = ref(false)
-const currentMaterial = ref(null)
+const {
+  previewDialogVisible,
+  currentPreviewMaterial: currentMaterial,
+  openMaterialPreview
+} = useMaterialPreviewDialog()
 
 // 文件上传
 const fileList = ref([])
@@ -331,18 +315,7 @@ const submitUpload = async () => {
 
 // 预览素材
 const handlePreview = async (material) => {
-  currentMaterial.value = null
-  previewDialogVisible.value = true
-  ElMessage.info('加载中...')
-  try {
-    // 等待一小段时间以确保对话框已打开
-    await new Promise(resolve => setTimeout(resolve, 100))
-    currentMaterial.value = material
-  } catch (error) {
-    console.error('预览素材出错:', error)
-    ElMessage.error('预览加载失败')
-    previewDialogVisible.value = false
-  }
+  openMaterialPreview(material)
 }
 
 // 删除素材
@@ -374,18 +347,6 @@ const handleDelete = (material) => {
     .catch(() => {
       // 取消删除
     })
-}
-
-// 获取预览URL
-const getPreviewUrl = (filePath) => {
-  const filename = filePath.split('/').pop()
-  return materialApi.getMaterialPreviewUrl(filename)
-}
-
-// 下载文件
-const downloadFile = (material) => {
-  const url = materialApi.downloadMaterial(material.file_path)
-  window.open(url, '_blank')
 }
 
 // 判断文件类型
@@ -484,14 +445,73 @@ onMounted(() => {
   
   .preview-container {
     display: flex;
-    justify-content: center;
-    align-items: center;
     flex-direction: column;
+    gap: 16px;
     padding: 0 20px;
-    
+
+    .preview-meta {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+
+      .preview-meta__title {
+        font-size: 16px;
+        font-weight: 600;
+        color: $text-primary;
+        word-break: break-all;
+      }
+
+      .preview-meta__details {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        font-size: 13px;
+        color: $text-secondary;
+      }
+    }
+
+    .video-preview,
+    .image-preview,
+    .audio-preview,
+    .document-preview,
     .file-info {
+      width: 100%;
       text-align: center;
-      margin-top: 20px;
+    }
+
+    .text-preview {
+      width: 100%;
+      max-height: 60vh;
+      overflow: auto;
+      padding: 16px;
+      border-radius: 8px;
+      background-color: #f6f8fa;
+      border: 1px solid #e5e7eb;
+
+      pre {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: $text-primary;
+      }
+    }
+
+    .document-preview__frame {
+      width: 100%;
+      height: 60vh;
+      border: 1px solid #dcdfe6;
+      border-radius: 8px;
+      background-color: #fff;
+    }
+
+    .preview-actions {
+      width: 100%;
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
     }
   }
 }

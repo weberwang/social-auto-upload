@@ -26,5 +26,16 @@ export const materialApi = {
   // 获取素材预览URL
   getMaterialPreviewUrl: (filename) => {
     return `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5409'}/getFile?filename=${filename}`
+  },
+
+  // 获取文本素材内容，用于素材管理弹窗内联预览
+  getMaterialTextPreview: async (filename) => {
+    const response = await fetch(
+      `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5409'}/getFile?filename=${encodeURIComponent(filename)}`
+    )
+    if (!response.ok) {
+      throw new Error(`预览加载失败: ${response.status}`)
+    }
+    return response.text()
   }
 }

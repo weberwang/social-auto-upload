@@ -74,6 +74,7 @@
                 <div v-for="(file, index) in tab.fileList" :key="index" class="file-item">
                   <el-link :href="file.url" target="_blank" type="primary">{{ file.name }}</el-link>
                   <span class="file-size">{{ (file.size / 1024 / 1024).toFixed(2) }}MB</span>
+                  <el-button size="small" @click="openSelectedFilePreview(file)">预览</el-button>
                   <el-button type="danger" size="small" @click="removeFile(tab, index)">删除</el-button>
                 </div>
               </div>
@@ -201,6 +202,7 @@
                         </div>
                       </div>
                     </el-checkbox>
+                    <el-button size="small" @click.stop="openMaterialLibraryPreview(material)">预览</el-button>
                   </div>
                 </div>
               </el-checkbox-group>
@@ -497,6 +499,11 @@
         </div>
       </div>
     </div>
+
+    <MaterialPreviewDialog
+      v-model="previewDialogVisible"
+      :material="currentPreviewMaterial"
+    />
   </div>
 </template>
 
@@ -506,6 +513,8 @@ import { Upload, Plus, Close, Folder } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { accountApi } from '@/api/account'
 import BilibiliPublishFields from '@/components/BilibiliPublishFields.vue'
+import MaterialPreviewDialog from '@/components/MaterialPreviewDialog.vue'
+import { useMaterialPreviewDialog } from '@/composables/useMaterialPreviewDialog.js'
 import { useAccountStore } from '@/stores/account'
 import { useAppStore } from '@/stores/app'
 import {
@@ -560,6 +569,12 @@ const currentUploadContentType = computed(() => currentUploadTab.value?.contentT
 const currentUploadMaterials = computed(() => (
   filterMaterialRecordsByContentType(materials.value, currentUploadContentType.value)
 ))
+const {
+  previewDialogVisible,
+  currentPreviewMaterial,
+  openMaterialPreview,
+  openPublishFilePreview
+} = useMaterialPreviewDialog()
 
 const batchPublishing = ref(false)
 const batchPublishMessage = ref('')
@@ -677,6 +692,14 @@ const removeFile = (tab, index) => {
   tab.fileList.splice(index, 1)
   tab.displayFileList = buildDisplayFileList(tab.fileList)
   ElMessage.success('文件删除成功')
+}
+
+const openSelectedFilePreview = (file) => {
+  openPublishFilePreview(file)
+}
+
+const openMaterialLibraryPreview = (material) => {
+  openMaterialPreview(material)
 }
 
 const openTopicDialog = (tab) => {
