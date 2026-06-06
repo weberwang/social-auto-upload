@@ -5,6 +5,7 @@ import { accountApi } from '../api/account.js'
 import { useAccountStore } from '../stores/account.js'
 import { useAppStore } from '../stores/app.js'
 import { http } from '../utils/request.js'
+import { bootstrapAccountManagementPage } from './accountManagementBootstrap.js'
 import { createAccountFetchCoordinator } from './accountFetchCoordinator.js'
 
 /**
@@ -464,10 +465,12 @@ export function useAccountManagement() {
    * 首次进入页面先快速出列表，再后台静默校验，兼顾感知速度与准确性。
    */
   onMounted(() => {
-    fetchAccountsQuick()
-    setTimeout(() => {
-      validateAllAccountsInBackground()
-    }, 100)
+    bootstrapAccountManagementPage({
+      isFirstVisit: appStore.isFirstTimeAccountManagement,
+      hasCachedAccounts: accountStore.accounts.length > 0,
+      fetchAccountsQuick,
+      validateAllAccountsInBackground
+    })
   })
 
   /**
