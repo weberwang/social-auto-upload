@@ -7,26 +7,11 @@ import { useAppStore } from '../stores/app.js'
 import { http } from '../utils/request.js'
 import { bootstrapAccountManagementPage } from './accountManagementBootstrap.js'
 import { createAccountFetchCoordinator } from './accountFetchCoordinator.js'
-
-/**
- * 平台标签颜色映射，集中定义便于后续扩平台时统一维护。
- */
-const PLATFORM_TAG_TYPE_MAP = {
-  快手: 'success',
-  抖音: 'danger',
-  视频号: 'warning',
-  小红书: 'info'
-}
-
-/**
- * 平台名称到后端类型编号的映射，前后端交互统一走这里，避免散落魔法值。
- */
-const PLATFORM_TYPE_MAP = {
-  小红书: 1,
-  视频号: 2,
-  抖音: 3,
-  快手: 4
-}
+import {
+  ACCOUNT_PLATFORM_SSE_LOGIN_SUPPORTED_LABELS,
+  ACCOUNT_PLATFORM_TAG_TYPE_MAP,
+  ACCOUNT_PLATFORM_TYPE_BY_LABEL
+} from '../constants/accountPlatforms.js'
 
 /**
  * 账号管理页面状态与交互的组合式封装。
@@ -43,6 +28,7 @@ export function useAccountManagement() {
   const sseConnecting = ref(false)
   const qrCodeData = ref('')
   const loginStatus = ref('')
+  const loginErrorMessage = ref('')
   const accountForm = reactive({
     id: null,
     name: '',
@@ -120,7 +106,7 @@ export function useAccountManagement() {
    * 返回平台标签样式。
    */
   function getPlatformTagType(platform) {
-    return PLATFORM_TAG_TYPE_MAP[platform] || 'info'
+    return ACCOUNT_PLATFORM_TAG_TYPE_MAP[platform] || 'info'
   }
 
   /**
@@ -143,6 +129,13 @@ export function useAccountManagement() {
     }
 
     return 'danger'
+  }
+
+  /**
+   * 平台扫码登录能力由统一常量维护，避免页面与后端支持集不一致。
+   */
+  function supportsSseLogin(platform) {
+    return ACCOUNT_PLATFORM_SSE_LOGIN_SUPPORTED_LABELS.has(platform)
   }
 
   /**
@@ -173,6 +166,7 @@ export function useAccountManagement() {
     sseConnecting.value = false
     qrCodeData.value = ''
     loginStatus.value = ''
+    loginErrorMessage.value = ''
     dialogVisible.value = true
   }
 
@@ -290,6 +284,7 @@ export function useAccountManagement() {
     sseConnecting.value = false
     qrCodeData.value = ''
     loginStatus.value = ''
+    loginErrorMessage.value = ''
     dialogVisible.value = true
 
     setTimeout(() => {
@@ -318,12 +313,18 @@ export function useAccountManagement() {
    * 建立登录 SSE 连接，负责接收二维码与登录结果。
    */
   function connectSSE(platform, name) {
+    if (!supportsSseLogin(platform)) {
+      ElMessage.error('当前平台暂不支持扫码登录')
+      return
+    }
+
     closeSSEConnection()
     sseConnecting.value = true
     qrCodeData.value = ''
     loginStatus.value = ''
+    loginErrorMessage.value = ''
 
-    const type = String(PLATFORM_TYPE_MAP[platform] || 1)
+    const type = String(ACCOUNT_PLATFORM_TYPE_BY_LABEL[platform] || 1)
     const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5409'
     const url = `${baseUrl}/login?type=${type}&id=${encodeURIComponent(name)}`
 
@@ -340,6 +341,11 @@ export function useAccountManagement() {
         } catch (error) {
           console.error('处理二维码数据失败:', error)
         }
+        return
+      }
+
+      if (data.startsWith('ERROR:')) {
+        loginErrorMessage.value = data.slice('ERROR:'.length).trim()
         return
       }
 
@@ -382,6 +388,9 @@ export function useAccountManagement() {
         sseConnecting.value = false
         qrCodeData.value = ''
         loginStatus.value = ''
+        if (loginErrorMessage.value) {
+          ElMessage.error(loginErrorMessage.value)
+        }
       }, 2000)
     }
 
@@ -403,12 +412,17 @@ export function useAccountManagement() {
       }
 
       if (dialogType.value === 'add') {
+        if (!supportsSseLogin(accountForm.platform)) {
+          ElMessage.error('当前平台暂不支持扫码登录')
+          return false
+        }
+
         connectSSE(accountForm.platform, accountForm.name)
         return true
       }
 
       try {
-        const type = PLATFORM_TYPE_MAP[accountForm.platform] || 1
+        const type = ACCOUNT_PLATFORM_TYPE_BY_LABEL[accountForm.platform] || 1
         const res = await accountApi.updateAccount({
           id: accountForm.id,
           type,
@@ -462,6 +476,13 @@ export function useAccountManagement() {
   })
 
   /**
+   * B 站当前只补展示链路与基础编辑能力，便于和 CLI 主线共存。
+   */
+  const filteredBilibiliAccounts = computed(() => {
+    return filteredAccounts.value.filter((account) => account.platform === 'B站')
+  })
+
+  /**
    * 首次进入页面先快速出列表，再后台静默校验，兼顾感知速度与准确性。
    */
   onMounted(() => {
@@ -490,6 +511,7 @@ export function useAccountManagement() {
     fetchAccounts,
     filteredAccounts,
     filteredChannelsAccounts,
+    filteredBilibiliAccounts,
     filteredDouyinAccounts,
     filteredKuaishouAccounts,
     filteredXiaohongshuAccounts,
@@ -506,6 +528,7 @@ export function useAccountManagement() {
     handleUploadCookie,
     isStatusClickable,
     loginStatus,
+    loginErrorMessage,
     qrCodeData,
     rules,
     searchKeyword,

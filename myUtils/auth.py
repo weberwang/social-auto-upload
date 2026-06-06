@@ -8,6 +8,7 @@ from playwright.async_api import Error as PlaywrightError, async_playwright
 from xhs import XhsClient
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS
+from myUtils.bilibili_web_bridge import check_bilibili_account_file
 from utils.base_social_media import set_init_script
 from utils.log import tencent_logger, kuaishou_logger, douyin_logger, xhs_logger
 from uploader.xhs_uploader.main import sign_local
@@ -152,6 +153,10 @@ async def check_cookie(type, file_path):
         # 快手
         case 4:
             return await _run_cookie_validator(cookie_auth_ks, account_file, kuaishou_logger, "快手")
+        # B站
+        case 5:
+            # B站校验不依赖 Playwright，而是直接走 biliup renew，因此单独用同步桥接函数。
+            return check_bilibili_account_file(file_path)
         case _:
             return False
 

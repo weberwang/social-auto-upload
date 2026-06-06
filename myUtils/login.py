@@ -1,13 +1,20 @@
 import asyncio
+import base64
+import io
+import json
 import sqlite3
+import uuid
+from pathlib import Path
+from typing import Any
 
+import segno
 from playwright.async_api import async_playwright
 
 from myUtils.auth import check_cookie
+from myUtils.bilibili_web_bridge import build_biliup_account_payload
 from uploader.douyin_uploader.main import douyin_cookie_gen as mainline_douyin_cookie_gen
 from utils.base_social_media import set_init_script
-import uuid
-from pathlib import Path
+from utils.log import bilibili_logger
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 
 # 统一获取浏览器启动配置（防风控+引入本地浏览器）
@@ -35,6 +42,121 @@ async def _push_douyin_qrcode_to_status_queue(qrcode_info, status_queue):
         status_queue.put(image_data_url)
 
 
+def _build_qrcode_data_url(qrcode_content: str) -> str:
+    """把二维码内容转成 PNG data URL，便于历史 Web 直接通过 SSE 展示。"""
+
+    image_buffer = io.BytesIO()
+    segno.make(qrcode_content).save(image_buffer, kind="png", scale=8, border=2)
+    base64_image = base64.b64encode(image_buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{base64_image}"
+
+
+def _save_user_info_record(platform_type: int, account_file_name: str, user_name: str) -> None:
+    """统一写入历史 Web 的账号表，避免各平台重复散落同一段 SQL。"""
+
+    with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            '''
+            INSERT INTO user_info (type, filePath, userName, status)
+            VALUES (?, ?, ?, ?)
+            ''',
+            (platform_type, account_file_name, user_name, 1),
+        )
+        conn.commit()
+        print("✅ 用户状态已记录")
+
+
+def _push_login_error(status_queue, user_message: str) -> None:
+    """统一把登录失败信息推给前端 SSE，并保留终态码兼容现有页面流程。"""
+
+    if user_message:
+        status_queue.put(f"ERROR:{user_message}")
+    status_queue.put("500")
+
+
+def _apply_bilibili_login_result(bili_client: Any, login_result: dict) -> None:
+    """把 biliup 二维码登录响应写回客户端对象，随后复用其 `store()` 持久化账号文件。"""
+
+    if (
+        not login_result
+        or login_result.get("code") != 0
+        or login_result.get("data") is None
+        or login_result["data"].get("cookie_info") is None
+    ):
+        raise RuntimeError(login_result or "B站二维码登录失败")
+
+    session = getattr(bili_client, "_BiliBili__session")
+    cookie_info = login_result["data"]["cookie_info"]["cookies"]
+    for cookie in cookie_info:
+        session.cookies.set(cookie["name"], cookie["value"])
+
+    bili_client.cookies = session.cookies.get_dict()
+    token_info = login_result["data"].get("token_info", {})
+    bili_client.access_token = token_info.get("access_token")
+    bili_client.refresh_token = token_info.get("refresh_token")
+
+
+def _store_bilibili_account_file(account_file: Path, bili_client: Any) -> None:
+    """把 B 站登录态持久化成 biliup CLI 可直接读取的账号文件结构。"""
+
+    raw_payload = {
+        **(bili_client.cookies or {}),
+        "access_token": bili_client.access_token or "",
+        "refresh_token": bili_client.refresh_token or "",
+    }
+    normalized_payload = build_biliup_account_payload(raw_payload)
+    account_file.write_text(
+        json.dumps(normalized_payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+async def bilibili_cookie_gen(id, status_queue):
+    """历史 Web B站登录入口，直接复用 biliup 提供的二维码登录 API。"""
+
+    uuid_v1 = uuid.uuid1()
+    print(f"UUID v1: {uuid_v1}")
+
+    cookies_dir = Path(BASE_DIR / "cookiesFile")
+    cookies_dir.mkdir(exist_ok=True)
+    account_file = cookies_dir / f"{uuid_v1}.json"
+
+    try:
+        from biliup.plugins.bili_webup import BiliBili, Data
+
+        bili_client = BiliBili(Data())
+        qrcode_result = bili_client.get_qrcode()
+        qrcode_url = qrcode_result.get("data", {}).get("url") if qrcode_result else ""
+        if not qrcode_url:
+            raise RuntimeError(qrcode_result or "B站二维码获取失败")
+
+        image_data_url = _build_qrcode_data_url(qrcode_url)
+        print("✅ 图片地址:", image_data_url[:80] + "...")
+        status_queue.put(image_data_url)
+        bilibili_logger.info("B站二维码已生成，等待用户扫码确认")
+
+        login_result = await bili_client.login_by_qrcode(qrcode_result)
+        _apply_bilibili_login_result(bili_client, login_result)
+        _store_bilibili_account_file(account_file, bili_client)
+    except Exception as exc:
+        bilibili_logger.exception(f"B站登录失败，账号名={id}，错误={exc}")
+        print(f"B站登录失败: {exc}")
+        _push_login_error(status_queue, f"B站登录失败：{exc}")
+        return None
+
+    result = await check_cookie(5, account_file.name)
+    if not result:
+        bilibili_logger.error(f"B站登录完成但账号校验失败，账号名={id}，文件={account_file.name}")
+        _push_login_error(status_queue, "B站登录完成，但账号校验失败")
+        return None
+
+    _save_user_info_record(5, account_file.name, id)
+    bilibili_logger.success(f"B站登录成功，账号名={id}，文件={account_file.name}")
+    status_queue.put("200")
+    return account_file
+
+
 # 抖音登录
 async def douyin_cookie_gen(id, status_queue):
     """历史 Web 抖音登录入口，复用主线扫码轮询逻辑，避免再依赖 URL 跳转判断成功。"""
@@ -58,17 +180,7 @@ async def douyin_cookie_gen(id, status_queue):
         status_queue.put("500")
         return None
 
-    with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            '''
-            INSERT INTO user_info (type, filePath, userName, status)
-            VALUES (?, ?, ?, ?)
-            ''',
-            (3, account_file.name, id, 1),
-        )
-        conn.commit()
-        print("✅ 用户状态已记录")
+    _save_user_info_record(3, account_file.name, id)
 
     status_queue.put("200")
 
@@ -141,14 +253,7 @@ async def get_tencent_cookie(id,status_queue):
         await context.close()
         await browser.close()
 
-        with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                                INSERT INTO user_info (type, filePath, userName, status)
-                                VALUES (?, ?, ?, ?)
-                                ''', (2, f"{uuid_v1}.json", id, 1))
-            conn.commit()
-            print("✅ 用户状态已记录")
+        _save_user_info_record(2, f"{uuid_v1}.json", id)
         status_queue.put("200")
 
 # 快手登录
@@ -215,14 +320,7 @@ async def get_ks_cookie(id,status_queue):
         await context.close()
         await browser.close()
 
-        with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                                        INSERT INTO user_info (type, filePath, userName, status)
-                                        VALUES (?, ?, ?, ?)
-                                        ''', (4, f"{uuid_v1}.json", id, 1))
-            conn.commit()
-            print("✅ 用户状态已记录")
+        _save_user_info_record(4, f"{uuid_v1}.json", id)
         status_queue.put("200")
 
 # 小红书登录
@@ -289,14 +387,7 @@ async def xiaohongshu_cookie_gen(id,status_queue):
         await context.close()
         await browser.close()
 
-        with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                           INSERT INTO user_info (type, filePath, userName, status)
-                           VALUES (?, ?, ?, ?)
-                           ''', (1, f"{uuid_v1}.json", id, 1))
-            conn.commit()
-            print("✅ 用户状态已记录")
+        _save_user_info_record(1, f"{uuid_v1}.json", id)
         status_queue.put("200")
 
 # a = asyncio.run(xiaohongshu_cookie_gen(4,None))

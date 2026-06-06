@@ -2,6 +2,8 @@
  * 发布中心平台配置。
  * 这里统一维护平台编号、名称和账号平台映射，避免超长视图文件继续堆平台分支。
  */
+import { IMAGE_FILE_FORMAT_TEXT, VIDEO_FILE_FORMAT_TEXT } from '@/constants/materialFormats'
+
 export const PUBLISH_CONTENT_TYPE_VIDEO = 'video'
 export const PUBLISH_CONTENT_TYPE_IMAGE_TEXT = 'image_text'
 
@@ -19,35 +21,35 @@ export const PUBLISH_PLATFORM_OPTIONS = [
     name: '抖音',
     supportedMaterialTypes: ['视频', '图文'],
     supportedContentTypes: [PUBLISH_CONTENT_TYPE_VIDEO, PUBLISH_CONTENT_TYPE_IMAGE_TEXT],
-    materialSupportDescription: '支持视频发布，也支持图片型图文内容。'
+    materialSupportDescription: `视频支持 ${VIDEO_FILE_FORMAT_TEXT}；图文图片支持 ${IMAGE_FILE_FORMAT_TEXT}。`
   },
   {
     key: 4,
     name: '快手',
     supportedMaterialTypes: ['视频', '图文'],
     supportedContentTypes: [PUBLISH_CONTENT_TYPE_VIDEO, PUBLISH_CONTENT_TYPE_IMAGE_TEXT],
-    materialSupportDescription: '支持视频发布，也支持图片型图文内容。'
+    materialSupportDescription: `视频支持 ${VIDEO_FILE_FORMAT_TEXT}；图文图片支持 ${IMAGE_FILE_FORMAT_TEXT}。`
   },
   {
     key: 2,
     name: '视频号',
     supportedMaterialTypes: ['视频'],
     supportedContentTypes: [PUBLISH_CONTENT_TYPE_VIDEO],
-    materialSupportDescription: '当前主线仅支持视频素材发布。'
+    materialSupportDescription: `当前主线仅支持视频素材发布，视频格式支持 ${VIDEO_FILE_FORMAT_TEXT}。`
   },
   {
     key: 1,
     name: '小红书',
     supportedMaterialTypes: ['视频', '图文'],
     supportedContentTypes: [PUBLISH_CONTENT_TYPE_VIDEO, PUBLISH_CONTENT_TYPE_IMAGE_TEXT],
-    materialSupportDescription: '支持视频发布，也支持图片型图文内容。'
+    materialSupportDescription: `视频支持 ${VIDEO_FILE_FORMAT_TEXT}；图文图片支持 ${IMAGE_FILE_FORMAT_TEXT}。`
   },
   {
     key: 5,
     name: 'B站',
     supportedMaterialTypes: ['视频'],
     supportedContentTypes: [PUBLISH_CONTENT_TYPE_VIDEO],
-    materialSupportDescription: '当前主线仅支持视频素材发布。'
+    materialSupportDescription: `当前主线仅支持视频素材发布，视频格式支持 ${VIDEO_FILE_FORMAT_TEXT}。`
   }
 ]
 

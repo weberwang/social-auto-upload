@@ -133,6 +133,7 @@ import { Refresh, Upload } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { materialApi } from '@/api/material'
 import MaterialPreviewDialog from '@/components/MaterialPreviewDialog.vue'
+import { summarizeMaterialUploadResults } from '@/composables/materialUploadBatch.js'
 import { useMaterialPreviewDialog } from '@/composables/useMaterialPreviewDialog.js'
 import { useAppStore } from '@/stores/app'
 import {
@@ -251,12 +252,14 @@ const submitUpload = async () => {
   }
   
   isUploading.value = true
+  const uploadResults = []
   
   for (const file of fileList.value) {
     try {
       // 确保文件对象存在
       if (!file || !file.raw) {
         ElMessage.warning(`文件 ${file.name} 对象无效，已跳过`)
+        uploadResults.push({ status: 'failure' })
         continue
       }
       
@@ -298,18 +301,26 @@ const submitUpload = async () => {
         ElMessage.success(`文件 ${file.name} 上传成功`)
         const progressData = uploadProgress.value[file.uid];
         if(progressData) progressData.speed = '完成';
+        uploadResults.push({ status: 'success' })
       } else {
         ElMessage.error(`文件 ${file.name} 上传失败: ${response.msg || '未知错误'}`)
+        uploadResults.push({ status: 'failure' })
       }
     } catch (error) {
       console.error(`上传文件 ${file.name} 出错:`, error)
       ElMessage.error(`文件 ${file.name} 上传失败: ${error.message || '未知错误'}`)
+      uploadResults.push({ status: 'failure' })
     }
   }
-  
+
+  const uploadSummary = summarizeMaterialUploadResults(uploadResults)
   isUploading.value = false
-  // Keep dialog open to show results
-  // uploadDialogVisible.value = false 
+
+  // 全部成功时直接关闭弹窗；只要存在失败，就保留现场给用户查看进度与错误提示。
+  if (uploadSummary.shouldCloseDialog) {
+    uploadDialogVisible.value = false
+  }
+
   await fetchMaterials()
 }
 

@@ -34,6 +34,16 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS file_records (
 )
 ''')
 
+# 创建发布中心草稿表
+cursor.execute('''CREATE TABLE IF NOT EXISTS publish_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,                   -- 草稿名称
+    payload TEXT NOT NULL,                -- 发布中心完整工作区 JSON 快照
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+''')
+
 
 # 提交更改
 conn.commit()

@@ -35,6 +35,18 @@ class CheckCookieTests(unittest.TestCase):
             with self.assertRaises(PlaywrightError):
                 asyncio.run(auth.check_cookie(3, "missing.json"))
 
+    def test_check_cookie_dispatches_bilibili_to_bridge(self):
+        """B站账号校验应走 biliup 桥接，而不是落回默认 False。"""
+
+        with patch(
+            "myUtils.auth.check_bilibili_account_file",
+            return_value=True,
+        ) as mock_check:
+            result = asyncio.run(auth.check_cookie(5, "bilibili_creator.json"))
+
+        self.assertTrue(result)
+        mock_check.assert_called_once_with("bilibili_creator.json")
+
 
 if __name__ == "__main__":
     unittest.main()

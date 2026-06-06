@@ -12,6 +12,13 @@ from flask import Flask, request, jsonify, Response, render_template, send_from_
 from werkzeug.utils import secure_filename
 from conf import BASE_DIR
 from myUtils.login import bilibili_cookie_gen, get_tencent_cookie, douyin_cookie_gen, get_ks_cookie, xiaohongshu_cookie_gen
+from myUtils.publish_drafts import (
+    PublishDraftError,
+    delete_publish_draft,
+    get_publish_draft,
+    list_publish_drafts,
+    save_publish_draft,
+)
 from myUtils.web_publish import PublishRequestError, dispatch_web_publish_request, parse_web_publish_request
 from utils.log import bilibili_logger
 
@@ -479,6 +486,68 @@ def postVideo():
             "msg": f"发布失败: {str(e)}",
             "data": None
         }), 500
+
+
+@app.route("/savePublishDraft", methods=["POST"])
+def save_publish_draft_endpoint():
+    """保存发布中心草稿，支持新建与覆盖已有草稿。"""
+
+    try:
+        draft = save_publish_draft(Path(BASE_DIR), request.get_json())
+        return jsonify(
+            {
+                "code": 200,
+                "msg": "草稿保存成功",
+                "data": draft,
+            }
+        ), 200
+    except PublishDraftError as error:
+        return jsonify({"code": error.status_code, "msg": str(error), "data": None}), error.status_code
+    except Exception as error:
+        print(f"保存发布草稿时出错: {error}")
+        return jsonify({"code": 500, "msg": f"保存草稿失败: {error}", "data": None}), 500
+
+
+@app.route("/getPublishDrafts", methods=["GET"])
+def get_publish_drafts_endpoint():
+    """返回发布中心草稿列表，供前端弹窗选择要加载的工作区。"""
+
+    try:
+        drafts = list_publish_drafts(Path(BASE_DIR))
+        return jsonify({"code": 200, "msg": "success", "data": drafts}), 200
+    except PublishDraftError as error:
+        return jsonify({"code": error.status_code, "msg": str(error), "data": None}), error.status_code
+    except Exception as error:
+        print(f"获取发布草稿列表时出错: {error}")
+        return jsonify({"code": 500, "msg": f"获取草稿列表失败: {error}", "data": None}), 500
+
+
+@app.route("/getPublishDraft", methods=["GET"])
+def get_publish_draft_endpoint():
+    """返回单个草稿详情，供发布中心完整回填全部 Tab 状态。"""
+
+    try:
+        draft = get_publish_draft(Path(BASE_DIR), request.args.get("id"))
+        return jsonify({"code": 200, "msg": "success", "data": draft}), 200
+    except PublishDraftError as error:
+        return jsonify({"code": error.status_code, "msg": str(error), "data": None}), error.status_code
+    except Exception as error:
+        print(f"获取发布草稿详情时出错: {error}")
+        return jsonify({"code": 500, "msg": f"获取草稿详情失败: {error}", "data": None}), 500
+
+
+@app.route("/deletePublishDraft", methods=["GET"])
+def delete_publish_draft_endpoint():
+    """删除指定草稿，避免前端继续展示已废弃的工作区快照。"""
+
+    try:
+        result = delete_publish_draft(Path(BASE_DIR), request.args.get("id"))
+        return jsonify({"code": 200, "msg": "草稿删除成功", "data": result}), 200
+    except PublishDraftError as error:
+        return jsonify({"code": error.status_code, "msg": str(error), "data": None}), error.status_code
+    except Exception as error:
+        print(f"删除发布草稿时出错: {error}")
+        return jsonify({"code": 500, "msg": f"删除草稿失败: {error}", "data": None}), 500
 
 
 @app.route('/updateUserinfo', methods=['POST'])

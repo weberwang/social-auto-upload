@@ -20,6 +20,18 @@
           </div>
         </div>
         <div class="tab-actions">
+          <PublishDraftActions
+            :visible="draftDialogVisible"
+            :loading="draftLoading"
+            :drafts="draftItems"
+            :current-draft-name="currentDraftName"
+            @save="saveDraft"
+            @open="openDraftDialog"
+            @refresh="refreshDrafts"
+            @load="loadDraft"
+            @delete="removeDraft"
+            @update:visible="draftDialogVisible = $event"
+          />
           <el-button 
             type="primary" 
             size="small" 
@@ -128,56 +140,14 @@
             </el-upload>
           </el-dialog>
 
-          <el-dialog
-            v-model="batchPublishDialogVisible"
-            title="批量发布进度"
-            width="500px"
-            :close-on-click-modal="false"
-            :close-on-press-escape="false"
-            :show-close="false"
-          >
-            <div class="publish-progress">
-              <el-progress 
-                :percentage="publishProgress"
-                :status="publishProgress === 100 ? 'success' : ''"
-              />
-              <div v-if="currentPublishingTab" class="current-publishing">
-                正在发布：{{ currentPublishingTab.label }}
-              </div>
-              
-              <div class="publish-results" v-if="publishResults.length > 0">
-                <div 
-                  v-for="(result, index) in publishResults" 
-                  :key="index"
-                  :class="['result-item', result.status]"
-                >
-                  <el-icon v-if="result.status === 'success'"><Check /></el-icon>
-                  <el-icon v-else-if="result.status === 'error'"><Close /></el-icon>
-                  <el-icon v-else><InfoFilled /></el-icon>
-                  <span class="label">{{ result.label }}</span>
-                  <span class="message">{{ result.message }}</span>
-                </div>
-              </div>
-            </div>
-            
-            <template #footer>
-              <div class="dialog-footer">
-                <el-button 
-                  @click="cancelBatchPublish" 
-                  :disabled="publishProgress === 100"
-                >
-                  取消发布
-                </el-button>
-                <el-button 
-                  type="primary" 
-                  @click="batchPublishDialogVisible = false"
-                  v-if="publishProgress === 100"
-                >
-                  关闭
-                </el-button>
-              </div>
-            </template>
-          </el-dialog>
+          <PublishBatchProgressDialog
+            :visible="batchPublishDialogVisible"
+            :progress="publishProgress"
+            :current-tab="currentPublishingTab"
+            :results="publishResults"
+            @cancel="cancelBatchPublish"
+            @update:visible="batchPublishDialogVisible = $event"
+          />
 
           <el-dialog
             v-model="materialLibraryVisible"
@@ -512,9 +482,12 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { Upload, Plus, Close, Folder } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { accountApi } from '@/api/account'
+import PublishBatchProgressDialog from '@/components/PublishBatchProgressDialog.vue'
 import BilibiliPublishFields from '@/components/BilibiliPublishFields.vue'
 import MaterialPreviewDialog from '@/components/MaterialPreviewDialog.vue'
+import PublishDraftActions from '@/components/PublishDraftActions.vue'
 import { useMaterialPreviewDialog } from '@/composables/useMaterialPreviewDialog.js'
+import { usePublishDrafts } from '@/composables/usePublishDrafts.js'
 import { useAccountStore } from '@/stores/account'
 import { useAppStore } from '@/stores/app'
 import {
@@ -544,6 +517,7 @@ import {
   getUploadSectionTitle,
   getUploadTipText
 } from '@/constants/publishMaterials'
+import { restorePublishDraftWorkspace } from '@/constants/publishDrafts'
 import { materialApi } from '@/api/material'
 import { http } from '@/utils/request'
 
@@ -577,8 +551,6 @@ const {
 } = useMaterialPreviewDialog()
 
 const batchPublishing = ref(false)
-const batchPublishMessage = ref('')
-const batchPublishType = ref('info')
 
 const platforms = PUBLISH_PLATFORM_OPTIONS
 
@@ -653,6 +625,42 @@ const recommendedTopics = [
   '科技', '生活', '娱乐', '体育', '教育', '艺术',
   '健康', '时尚', '美妆', '摄影', '宠物', '汽车'
 ]
+
+/**
+ * 草稿加载会直接替换整个工作区，因此需要一次性重建 Tab、激活项和临时弹窗状态。
+ */
+const applyDraftWorkspace = (workspace) => {
+  const restoredWorkspace = restorePublishDraftWorkspace(workspace)
+  tabs.splice(0, tabs.length, ...restoredWorkspace.tabs)
+  activeTab.value = restoredWorkspace.activeTab
+  tabCounter = restoredWorkspace.tabCounter
+  currentTab.value = null
+  currentUploadTab.value = null
+  tempSelectedAccounts.value = []
+  selectedMaterials.value = []
+  uploadOptionsVisible.value = false
+  localUploadVisible.value = false
+  materialLibraryVisible.value = false
+  accountDialogVisible.value = false
+  topicDialogVisible.value = false
+}
+
+const {
+  currentDraftName,
+  draftDialogVisible,
+  draftItems,
+  draftLoading,
+  openDraftDialog,
+  refreshDrafts,
+  removeDraft,
+  saveDraft,
+  loadDraft
+} = usePublishDrafts({
+  getTabs: () => tabs,
+  getActiveTab: () => activeTab.value,
+  getTabCounter: () => tabCounter,
+  applyWorkspace: applyDraftWorkspace
+})
 
 const addTab = () => {
   tabCounter++
@@ -1123,57 +1131,6 @@ onMounted(() => {
     }
   }
   
-  // 批量发布进度对话框样式
-  .publish-progress {
-    padding: 20px;
-    
-    .current-publishing {
-      margin: 15px 0;
-      text-align: center;
-      color: #606266;
-    }
-
-    .publish-results {
-      margin-top: 20px;
-      border-top: 1px solid #EBEEF5;
-      padding-top: 15px;
-      max-height: 300px;
-      overflow-y: auto;
-
-      .result-item {
-        display: flex;
-        align-items: center;
-        padding: 8px 0;
-        color: #606266;
-
-        .el-icon {
-          margin-right: 8px;
-        }
-
-        .label {
-          margin-right: 10px;
-          font-weight: 500;
-        }
-
-        .message {
-          color: #909399;
-        }
-
-        &.success {
-          color: #67C23A;
-        }
-
-        &.error {
-          color: #F56C6C;
-        }
-
-        &.cancelled {
-          color: #909399;
-        }
-      }
-    }
-  }
-
   .dialog-footer {
     text-align: right;
   }

@@ -2,12 +2,12 @@
  * 素材格式常量。
  * 统一维护前端可识别的视频/图片扩展名，避免素材管理和仪表盘各写一套判断逻辑。
  */
-export const VIDEO_FILE_EXTENSIONS = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv']
+export const VIDEO_FILE_EXTENSIONS = ['.mp4', '.mov', '.avi', '.mkv', '.m4v', '.webm', '.flv', '.wmv']
 
 /**
  * 图文素材使用的图片扩展名。
  */
-export const IMAGE_FILE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
+export const IMAGE_FILE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.bmp']
 
 /**
  * 可直接文本预览的素材扩展名。
@@ -27,12 +27,21 @@ export const AUDIO_FILE_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.m4a']
 /**
  * 素材上传提示里使用的视频格式文案。
  */
-export const VIDEO_FILE_FORMAT_TEXT = 'MP4 / AVI / MOV / WMV / FLV / MKV'
+export const VIDEO_FILE_FORMAT_TEXT = 'MP4 / MOV / AVI / MKV / M4V / WEBM / FLV / WMV'
 
 /**
  * 素材上传提示里使用的图片格式文案。
  */
-export const IMAGE_FILE_FORMAT_TEXT = 'JPG / JPEG / PNG / GIF / BMP / WEBP'
+export const IMAGE_FILE_FORMAT_TEXT = 'JPG / JPEG / PNG / WEBP / BMP'
+
+/**
+ * 素材管理页本地上传控件使用的 accept 字符串。
+ * 这里显式限制到主线真实支持的格式，避免用户误传 GIF 等当前上传器并不接受的文件。
+ */
+export const MATERIAL_UPLOAD_ACCEPT = [
+  ...VIDEO_FILE_EXTENSIONS,
+  ...IMAGE_FILE_EXTENSIONS
+].join(',')
 
 /**
  * 判断文件名是否属于视频素材。
@@ -98,6 +107,12 @@ export function getMaterialTypeTag(filename) {
  */
 export function getVideoMimeType(filename) {
   const lowerCaseFilename = filename.toLowerCase()
+  if (lowerCaseFilename.endsWith('.m4v')) {
+    return 'video/x-m4v'
+  }
+  if (lowerCaseFilename.endsWith('.webm')) {
+    return 'video/webm'
+  }
   if (lowerCaseFilename.endsWith('.mov')) {
     return 'video/quicktime'
   }
