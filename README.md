@@ -84,12 +84,23 @@
 sau-mcp
 ```
 
-常用接口：
+当前 Node MCP 常用接口：
 
 - `GET /mcp/health`
 - `GET /mcp/capabilities`
 - `POST /mcp/tasks`
 - `GET /mcp/tasks/<task_id>/events`
+
+主线工具入口：
+
+- `POST /mcp/tools/account_login`
+- `POST /mcp/tools/account_check`
+- `POST /mcp/tools/publish_submit`
+- `POST /mcp/tools/draft_save`
+- `POST /mcp/tools/draft_delete`
+- `POST /mcp/tools/schedule_create`
+- `POST /mcp/tools/schedule_update`
+- `POST /mcp/tools/schedule_delete`
 
 其中 `/mcp/capabilities` 会返回当前真实支持的工具和平台列表，`/mcp/tasks/<task_id>/events` 会以 SSE 格式输出任务历史事件。
 

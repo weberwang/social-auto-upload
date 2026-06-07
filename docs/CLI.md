@@ -115,6 +115,17 @@ MCP 服务默认监听 `http://127.0.0.1:5410`，当前提供的核心接口如�
 - `POST /mcp/tasks`
 - `GET /mcp/tasks/<task_id>/events`
 
+同步/异步工具入口：
+
+- `POST /mcp/tools/account_login`
+- `POST /mcp/tools/account_check`
+- `POST /mcp/tools/publish_submit`
+- `POST /mcp/tools/draft_save`
+- `POST /mcp/tools/draft_delete`
+- `POST /mcp/tools/schedule_create`
+- `POST /mcp/tools/schedule_update`
+- `POST /mcp/tools/schedule_delete`
+
 说明：
 
 - `/mcp/capabilities` 只会返回当前真实支持的低层工具和平台列表，客户端应先调用它再发起任务

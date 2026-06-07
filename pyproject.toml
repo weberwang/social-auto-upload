@@ -20,7 +20,7 @@ dependencies = [
 
 [project.scripts]
 sau = "sau_cli:main"
-sau-mcp = "sau_mcp_server.app:main"
+sau-mcp = "sau_mcp_launcher:main"
 
 [project.optional-dependencies]
 web = [
@@ -37,11 +37,12 @@ py-modules = [
   "sau_cli",
   "sau_cli_account_helpers",
   "sau_cli_platform_bridge",
+  "sau_mcp_launcher",
 ]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["uploader*", "utils*", "myUtils*", "sau_mcp_server*"]
+include = ["uploader*", "utils*", "myUtils*", "sau_mcp_server*", "sau_bridge*"]
 
 [tool.setuptools.package-data]
 utils = ["stealth.min.js"]
