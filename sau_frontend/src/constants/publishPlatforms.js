@@ -2,7 +2,7 @@
  * 发布中心平台配置。
  * 这里统一维护平台编号、名称和账号平台映射，避免超长视图文件继续堆平台分支。
  */
-import { IMAGE_FILE_FORMAT_TEXT, VIDEO_FILE_FORMAT_TEXT } from '@/constants/materialFormats'
+import { IMAGE_FILE_FORMAT_TEXT, VIDEO_FILE_FORMAT_TEXT } from './materialFormats.js'
 
 export const PUBLISH_CONTENT_TYPE_VIDEO = 'video'
 export const PUBLISH_CONTENT_TYPE_IMAGE_TEXT = 'image_text'

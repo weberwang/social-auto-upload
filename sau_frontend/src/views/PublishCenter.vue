@@ -74,7 +74,7 @@
           <div class="upload-section">
             <h3>{{ getUploadSectionTitle(tab.contentType) }}</h3>
             <div class="upload-options">
-              <el-button type="primary" @click="showUploadOptions(tab)" class="upload-btn">
+              <el-button type="primary" @click="openMaterialLibrary(tab)" class="upload-btn">
                 <el-icon><Upload /></el-icon>
                 {{ getUploadButtonText(tab.contentType) }}
               </el-button>
@@ -94,26 +94,8 @@
           </div>
 
           <el-dialog
-            v-model="uploadOptionsVisible"
-            title="选择上传方式"
-            width="400px"
-            class="upload-options-dialog"
-          >
-            <div class="upload-options-content">
-              <el-button type="primary" @click="selectLocalUpload" class="option-btn">
-                <el-icon><Upload /></el-icon>
-                本地上传
-              </el-button>
-              <el-button type="success" @click="selectMaterialLibrary" class="option-btn">
-                <el-icon><Folder /></el-icon>
-                素材库
-              </el-button>
-            </div>
-          </el-dialog>
-
-          <el-dialog
             v-model="localUploadVisible"
-            title="本地上传"
+            title="上传素材"
             width="600px"
             class="local-upload-dialog"
           >
@@ -149,41 +131,19 @@
             @update:visible="batchPublishDialogVisible = $event"
           />
 
-          <el-dialog
-            v-model="materialLibraryVisible"
-            title="选择素材"
-            width="800px"
-            class="material-library-dialog"
-          >
-            <div class="material-library-content">
-              <el-checkbox-group v-model="selectedMaterials">
-                <div class="material-list">
-                  <div
-                    v-for="material in currentUploadMaterials"
-                    :key="material.id"
-                    class="material-item"
-                  >
-                    <el-checkbox :label="material.id" class="material-checkbox">
-                      <div class="material-info">
-                        <div class="material-name">{{ material.filename }}</div>
-                        <div class="material-details">
-                          <span class="file-size">{{ material.filesize }}MB</span>
-                          <span class="upload-time">{{ material.upload_time }}</span>
-                        </div>
-                      </div>
-                    </el-checkbox>
-                    <el-button size="small" @click.stop="openMaterialLibraryPreview(material)">预览</el-button>
-                  </div>
-                </div>
-              </el-checkbox-group>
-            </div>
-            <template #footer>
-              <div class="dialog-footer">
-                <el-button @click="materialLibraryVisible = false">取消</el-button>
-                <el-button type="primary" @click="confirmMaterialSelection">确定</el-button>
-              </div>
-            </template>
-          </el-dialog>
+          <PublishMaterialSelectorDialog
+            :visible="materialLibraryVisible"
+            :rows="currentUploadMaterialRows"
+            :platform-name="currentUploadPlatformName"
+            :platform-supports-image-text="currentUploadPlatformSupportsImageText"
+            :selected-material-ids="selectedMaterials"
+            :empty-state="materialLibraryEmptyState"
+            @update:visible="materialLibraryVisible = $event"
+            @update:selected-material-ids="selectedMaterials = $event"
+            @preview="openMaterialLibraryPreview"
+            @upload="openLocalUploadFromMaterialLibrary"
+            @confirm="confirmMaterialSelection"
+          />
 
           <div class="account-section">
             <h3>账号</h3>
@@ -479,12 +439,13 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Upload, Plus, Close, Folder } from '@element-plus/icons-vue'
+import { Upload, Plus, Close } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { accountApi } from '@/api/account'
 import PublishBatchProgressDialog from '@/components/PublishBatchProgressDialog.vue'
 import BilibiliPublishFields from '@/components/BilibiliPublishFields.vue'
 import MaterialPreviewDialog from '@/components/MaterialPreviewDialog.vue'
+import PublishMaterialSelectorDialog from '@/components/PublishMaterialSelectorDialog.vue'
 import PublishDraftActions from '@/components/PublishDraftActions.vue'
 import { useMaterialPreviewDialog } from '@/composables/useMaterialPreviewDialog.js'
 import { usePublishDrafts } from '@/composables/usePublishDrafts.js'
@@ -505,11 +466,12 @@ import {
 } from '@/constants/publishPlatforms'
 import {
   PUBLISH_CONTENT_TYPE_VIDEO,
+  buildPublishMaterialSelectionRows,
   buildDisplayFileList,
   createPublishFileFromMaterial,
   createPublishFileFromUpload,
   filterFilesByContentType,
-  filterMaterialRecordsByContentType,
+  getMaterialLibraryEmptyState,
   getEmptyFileMessage,
   getNotePlaceholder,
   getUploadAccept,
@@ -524,7 +486,7 @@ import { http } from '@/utils/request'
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5409'
 
 const authHeaders = computed(() => ({
-  'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+  Authorization: `Bearer ${localStorage.getItem('token') || ''}`
 }))
 
 const activeTab = ref('tab1')
@@ -533,15 +495,18 @@ let tabCounter = 1
 
 const appStore = useAppStore()
 
-const uploadOptionsVisible = ref(false)
 const localUploadVisible = ref(false)
 const materialLibraryVisible = ref(false)
 const currentUploadTab = ref(null)
 const selectedMaterials = ref([])
 const materials = computed(() => appStore.materials)
 const currentUploadContentType = computed(() => currentUploadTab.value?.contentType || PUBLISH_CONTENT_TYPE_VIDEO)
-const currentUploadMaterials = computed(() => (
-  filterMaterialRecordsByContentType(materials.value, currentUploadContentType.value)
+const currentUploadPlatformKey = computed(() => currentUploadTab.value?.selectedPlatform || 0)
+const currentUploadMaterialRows = computed(() => (
+  buildPublishMaterialSelectionRows(materials.value, currentUploadPlatformKey.value)
+))
+const materialLibraryEmptyState = computed(() => (
+  getMaterialLibraryEmptyState(materials.value, currentUploadPlatformKey.value)
 ))
 const {
   previewDialogVisible,
@@ -558,6 +523,10 @@ const platforms = PUBLISH_PLATFORM_OPTIONS
  * 返回平台展示名称，供图文正文占位文案和提示信息复用。
  */
 const getPlatformName = (platformKey) => getPublishPlatformOption(platformKey)?.name || '当前平台'
+const currentUploadPlatformName = computed(() => getPlatformName(currentUploadPlatformKey.value))
+const currentUploadPlatformSupportsImageText = computed(() => (
+  getSupportedContentTypesForPlatform(currentUploadPlatformKey.value).includes(PUBLISH_CONTENT_TYPE_IMAGE_TEXT)
+))
 
 /**
  * 返回当前 Tab 可选择的内容类型列表。
@@ -638,7 +607,6 @@ const applyDraftWorkspace = (workspace) => {
   currentUploadTab.value = null
   tempSelectedAccounts.value = []
   selectedMaterials.value = []
-  uploadOptionsVisible.value = false
   localUploadVisible.value = false
   materialLibraryVisible.value = false
   accountDialogVisible.value = false
@@ -687,12 +655,12 @@ const handleUploadSuccess = (response, file, tab) => {
     tab.fileList.push(fileInfo)
     tab.displayFileList = buildDisplayFileList(tab.fileList)
     ElMessage.success('文件上传成功')
-  } else {
-    ElMessage.error(response.msg || '上传失败')
+    return
   }
+  ElMessage.error(response.msg || '上传失败')
 }
 
-const handleUploadError = (error) => {
+const handleUploadError = () => {
   ElMessage.error('文件上传失败')
 }
 
@@ -894,19 +862,13 @@ const confirmPublish = async (tab) => {
   }
 }
 
-const showUploadOptions = (tab) => {
-  currentUploadTab.value = tab
-  uploadOptionsVisible.value = true
-}
-
-const selectLocalUpload = () => {
-  uploadOptionsVisible.value = false
-  localUploadVisible.value = true
-}
-
-const selectMaterialLibrary = async () => {
-  uploadOptionsVisible.value = false
-  
+/**
+ * 选择素材直接进入素材列表弹窗；上传能力作为弹窗内动作提供，不再额外插入来源切换步骤。
+ */
+const openMaterialLibrary = async (tab) => {
+  if (tab) {
+    currentUploadTab.value = tab
+  }
   if (materials.value.length === 0) {
     try {
       const response = await materialApi.getAllMaterials()
@@ -927,6 +889,11 @@ const selectMaterialLibrary = async () => {
   materialLibraryVisible.value = true
 }
 
+const openLocalUploadFromMaterialLibrary = () => {
+  materialLibraryVisible.value = false
+  localUploadVisible.value = true
+}
+
 const confirmMaterialSelection = () => {
   if (selectedMaterials.value.length === 0) {
     ElMessage.warning('请选择至少一个素材')
@@ -934,14 +901,27 @@ const confirmMaterialSelection = () => {
   }
   
   if (currentUploadTab.value) {
-    selectedMaterials.value.forEach(materialId => {
-      const material = currentUploadMaterials.value.find(m => m.id === materialId)
-      if (material) {
-        const fileInfo = createPublishFileFromMaterial(material, materialApi.getMaterialPreviewUrl)
-        const exists = currentUploadTab.value.fileList.some(file => file.path === fileInfo.path)
-        if (!exists) {
-          currentUploadTab.value.fileList.push(fileInfo)
-        }
+    const selectedRows = selectedMaterials.value
+      .map((materialId) => currentUploadMaterialRows.value.find((row) => row.id === materialId))
+      .filter((material) => material?.compatible)
+
+    const selectionContentTypes = [...new Set(selectedRows.map((material) => material.selectionContentType).filter(Boolean))]
+    if (selectionContentTypes.length > 1) {
+      ElMessage.error('图片和视频素材不能同时选择，请分开发布。')
+      return
+    }
+
+    const targetContentType = selectionContentTypes[0]
+    if (targetContentType && currentUploadTab.value.contentType !== targetContentType) {
+      currentUploadTab.value.contentType = targetContentType
+      handleContentTypeChange(currentUploadTab.value)
+    }
+
+    selectedRows.forEach((material) => {
+      const fileInfo = createPublishFileFromMaterial(material, materialApi.getMaterialPreviewUrl)
+      const exists = currentUploadTab.value.fileList.some((file) => file.path === fileInfo.path)
+      if (!exists) {
+        currentUploadTab.value.fileList.push(fileInfo)
       }
     })
 
