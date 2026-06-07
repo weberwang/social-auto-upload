@@ -82,6 +82,48 @@ class UploadEndpointTests(unittest.TestCase):
         self.assertIn("attachment", response.headers.get("Content-Disposition", ""))
         self.assertEqual(response.data, b"preview content")
 
+    def test_get_files_returns_pagination_metadata_for_material_management(self):
+        """素材管理分页查询应返回当前页数据以及总数元信息。"""
+        self._insert_material_record("older.mp4", 2.1, "2026-06-01 09:00:00", "uuid_older.mp4")
+        self._insert_material_record("middle.jpg", 3.2, "2026-06-02 09:00:00", "uuid_middle.jpg")
+        self._insert_material_record("latest.mp4", 4.3, "2026-06-03 09:00:00", "uuid_latest.mp4")
+
+        with patch("sau_backend.BASE_DIR", self.base_dir):
+            response = self.client.get(
+                "/getFiles?page=2&page_size=1&sort_by=upload_time&sort_order=desc",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["code"], 200)
+        self.assertEqual(payload["pagination"], {
+            "page": 2,
+            "page_size": 1,
+            "total": 3,
+            "total_pages": 3,
+        })
+        self.assertEqual([item["filename"] for item in payload["data"]], ["middle.jpg"])
+
+    def test_get_files_supports_keyword_type_and_size_sort_filters(self):
+        """素材管理分页查询应支持关键字、类型过滤和按大小排序。"""
+        self._insert_material_record("cover-small.jpg", 1.5, "2026-06-01 09:00:00", "uuid_cover_small.jpg")
+        self._insert_material_record("cover-large.jpg", 8.5, "2026-06-02 09:00:00", "uuid_cover_large.jpg")
+        self._insert_material_record("video-large.mp4", 9.5, "2026-06-03 09:00:00", "uuid_video_large.mp4")
+
+        with patch("sau_backend.BASE_DIR", self.base_dir):
+            response = self.client.get(
+                "/getFiles?page=1&page_size=10&keyword=cover&material_type=图片&sort_by=filesize&sort_order=desc",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["code"], 200)
+        self.assertEqual(payload["pagination"]["total"], 2)
+        self.assertEqual(
+            [item["filename"] for item in payload["data"]],
+            ["cover-large.jpg", "cover-small.jpg"],
+        )
+
     def _prepare_database(self):
         """构造测试所需的最小数据库结构，避免依赖真实环境数据。"""
         db_dir = self.base_dir / "db"
@@ -99,6 +141,19 @@ class UploadEndpointTests(unittest.TestCase):
                     file_path TEXT
                 )
                 """
+            )
+            conn.commit()
+
+    def _insert_material_record(self, filename, filesize, upload_time, file_path):
+        """向测试数据库写入素材记录，便于稳定校验分页与排序行为。"""
+        with sqlite3.connect(self.base_dir / "db" / "database.db") as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO file_records (filename, filesize, upload_time, file_path)
+                VALUES (?, ?, ?, ?)
+                """,
+                (filename, filesize, upload_time, file_path),
             )
             conn.commit()
 

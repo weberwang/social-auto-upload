@@ -6,6 +6,11 @@ export const materialApi = {
   getAllMaterials: () => {
     return http.get('/getFiles')
   },
+
+  // 分页获取素材
+  getMaterialPage: (params) => {
+    return http.get('/getFiles', params)
+  },
   
   // 上传素材
   uploadMaterial: (formData, onUploadProgress) => {

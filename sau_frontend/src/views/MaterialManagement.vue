@@ -6,25 +6,51 @@
     
     <div class="material-list-container">
       <div class="material-search">
-        <el-input
-          v-model="searchKeyword"
-          placeholder="输入文件名搜索"
-          prefix-icon="Search"
-          clearable
-          @clear="handleSearch"
-          @input="handleSearch"
-        />
+        <div class="material-search__filters">
+          <el-input
+            v-model="searchKeyword"
+            placeholder="输入文件名搜索"
+            prefix-icon="Search"
+            clearable
+            @clear="handleSearch"
+            @input="handleSearch"
+          />
+          <el-select
+            v-model="selectedMaterialType"
+            placeholder="筛选类型"
+            @change="handleSearch"
+          >
+            <el-option
+              v-for="option in materialTypeFilterOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+          <el-select
+            v-model="selectedMaterialSort"
+            placeholder="排序方式"
+            @change="handleSearch"
+          >
+            <el-option
+              v-for="option in materialSortOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </div>
         <div class="action-buttons">
           <el-button type="primary" @click="handleUploadMaterial">上传素材</el-button>
-          <el-button type="info" @click="fetchMaterials" :loading="false">
+          <el-button type="info" @click="handleRefresh" :loading="false">
             <el-icon :class="{ 'is-loading': isRefreshing }"><Refresh /></el-icon>
             <span v-if="isRefreshing">刷新中</span>
           </el-button>
         </div>
       </div>
       
-      <div v-if="filteredMaterials.length > 0" class="material-list">
-        <el-table :data="filteredMaterials" style="width: 100%">
+      <div v-if="materials.length > 0" class="material-list">
+        <el-table :data="materials" style="width: 100%">
           <el-table-column prop="uuid" label="UUID" width="180" />
           <el-table-column prop="filename" label="文件名" width="300" />
           <el-table-column label="类型" width="110">
@@ -47,6 +73,18 @@
             </template>
           </el-table-column>
         </el-table>
+        <div class="material-pagination">
+          <el-pagination
+            background
+            layout="total, sizes, prev, pager, next, jumper"
+            :current-page="currentPage"
+            :page-size="pageSize"
+            :page-sizes="materialPageSizeOptions"
+            :total="totalMaterials"
+            @current-change="handlePageChange"
+            @size-change="handlePageSizeChange"
+          />
+        </div>
       </div>
       
       <div v-else class="empty-data">
@@ -133,6 +171,12 @@ import { Refresh, Upload } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { materialApi } from '@/api/material'
 import MaterialPreviewDialog from '@/components/MaterialPreviewDialog.vue'
+import {
+  MATERIAL_PAGE_SIZE_OPTIONS,
+  MATERIAL_SORT_OPTIONS,
+  MATERIAL_TYPE_FILTER_OPTIONS,
+  buildMaterialListQueryParams
+} from '@/composables/materialListQuery.js'
 import { summarizeMaterialUploadResults } from '@/composables/materialUploadBatch.js'
 import { useMaterialPreviewDialog } from '@/composables/useMaterialPreviewDialog.js'
 import { useAppStore } from '@/stores/app'
@@ -140,18 +184,37 @@ import {
   IMAGE_FILE_FORMAT_TEXT,
   VIDEO_FILE_FORMAT_TEXT,
   getMaterialType,
-  getMaterialTypeTag,
-  isImageMaterial,
-  isVideoMaterial
+  getMaterialTypeTag
 } from '@/constants/materialFormats'
 
 // 获取应用状态管理
 const appStore = useAppStore()
 
 // 搜索和状态控制
+const materials = ref([])
 const searchKeyword = ref('')
+const selectedMaterialType = ref(MATERIAL_TYPE_FILTER_OPTIONS[0].value)
+const selectedMaterialSort = ref(MATERIAL_SORT_OPTIONS[0].value)
+const currentPage = ref(1)
+const pageSize = ref(MATERIAL_PAGE_SIZE_OPTIONS[1])
+const totalMaterials = ref(0)
 const isRefreshing = ref(false)
 const isUploading = ref(false)
+
+/**
+ * 素材筛选项直接暴露给模板，确保选项来源与过滤逻辑共用一套定义。
+ */
+const materialTypeFilterOptions = MATERIAL_TYPE_FILTER_OPTIONS
+
+/**
+ * 排序选项集中维护，后续如果增加“按名称”之类排序，不需要再分散改模板常量。
+ */
+const materialSortOptions = MATERIAL_SORT_OPTIONS
+
+/**
+ * 分页尺寸集中维护，避免模板硬编码导致前后端默认页长不一致。
+ */
+const materialPageSizeOptions = MATERIAL_PAGE_SIZE_OPTIONS
 
 // 对话框控制
 const uploadDialogVisible = ref(false)
@@ -177,14 +240,29 @@ watch(fileList, (newList) => {
 
 
 // 获取素材列表
-const fetchMaterials = async () => {
+const fetchMaterials = async ({ showSuccess = false } = {}) => {
   isRefreshing.value = true
   try {
-    const response = await materialApi.getAllMaterials()
+    const response = await materialApi.getMaterialPage(
+      buildMaterialListQueryParams({
+        currentPage: currentPage.value,
+        pageSize: pageSize.value,
+        searchKeyword: searchKeyword.value,
+        selectedType: selectedMaterialType.value,
+        selectedSort: selectedMaterialSort.value
+      })
+    )
     
     if (response.code === 200) {
-      appStore.setMaterials(response.data)
-      ElMessage.success('刷新成功')
+      materials.value = response.data
+      currentPage.value = response.pagination?.page ?? currentPage.value
+      pageSize.value = response.pagination?.page_size ?? pageSize.value
+      totalMaterials.value = response.pagination?.total ?? response.data.length
+      // 素材管理页已改成分页拉取，原有全量缓存不再可信，这里主动失效避免其他页面误用旧数据。
+      invalidateMaterialCache()
+      if (showSuccess) {
+        ElMessage.success('刷新成功')
+      }
     } else {
       ElMessage.error('获取素材列表失败')
     }
@@ -196,19 +274,41 @@ const fetchMaterials = async () => {
   }
 }
 
-// 过滤素材
-const filteredMaterials = computed(() => {
-  if (!searchKeyword.value) return appStore.materials
-  
-  const keyword = searchKeyword.value.toLowerCase()
-  return appStore.materials.filter(material => 
-    material.filename.toLowerCase().includes(keyword)
-  )
-})
-
 // 搜索处理
 const handleSearch = () => {
-  // 搜索逻辑已通过计算属性实现
+  currentPage.value = 1
+  fetchMaterials()
+}
+
+/**
+ * 手动刷新沿用当前筛选条件和页码，只额外提示成功消息。
+ */
+const handleRefresh = () => {
+  fetchMaterials({ showSuccess: true })
+}
+
+/**
+ * 切页时只替换页码，其他查询条件保持不变。
+ */
+const handlePageChange = (page) => {
+  currentPage.value = page
+  fetchMaterials()
+}
+
+/**
+ * 切换分页大小后回到第一页，避免旧页码超过新总页数时出现空页。
+ */
+const handlePageSizeChange = (size) => {
+  pageSize.value = size
+  currentPage.value = 1
+  fetchMaterials()
+}
+
+/**
+ * 其他页面仍依赖全量素材缓存，这里在素材变更后主动失效，确保后续进入时会重新拉取。
+ */
+const invalidateMaterialCache = () => {
+  appStore.setMaterials([])
 }
 
 // 上传素材
@@ -321,7 +421,9 @@ const submitUpload = async () => {
     uploadDialogVisible.value = false
   }
 
+  currentPage.value = 1
   await fetchMaterials()
+  invalidateMaterialCache()
 }
 
 // 预览素材
@@ -345,7 +447,11 @@ const handleDelete = (material) => {
         const response = await materialApi.deleteMaterial(material.id)
         
         if (response.code === 200) {
-          appStore.removeMaterial(material.id)
+          if (materials.value.length === 1 && currentPage.value > 1) {
+            currentPage.value -= 1
+          }
+          invalidateMaterialCache()
+          await fetchMaterials()
           ElMessage.success('删除成功')
         } else {
           ElMessage.error(response.msg || '删除失败')
@@ -362,16 +468,6 @@ const handleDelete = (material) => {
 
 // 判断文件类型
 /**
- * 素材管理页复用共享格式判断，确保上传提示、列表标签和预览分支口径一致。
- */
-const isVideoFile = isVideoMaterial
-
-/**
- * 图片预览与统计共用统一识别逻辑，避免后续扩展格式时漏改页面。
- */
-const isImageFile = isImageMaterial
-
-/**
  * 返回素材展示类型，供表格直接渲染标签。
  */
 const getFileType = getMaterialType
@@ -383,10 +479,7 @@ const getFileTypeTag = getMaterialTypeTag
 
 // 组件挂载时获取素材列表
 onMounted(() => {
-  // 只有store中没有数据时才获取
-  if (appStore.materials.length === 0) {
-    fetchMaterials()
-  }
+  fetchMaterials()
 })
 </script>
 
@@ -425,14 +518,27 @@ onMounted(() => {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 16px;
       margin-bottom: 20px;
       
-      .el-input {
-        width: 300px;
+      .material-search__filters {
+        display: flex;
+        flex: 1;
+        flex-wrap: wrap;
+        gap: 12px;
+
+        .el-input {
+          width: 300px;
+        }
+
+        .el-select {
+          width: 180px;
+        }
       }
       
       .action-buttons {
         display: flex;
+        flex-shrink: 0;
         gap: 10px;
         
         .is-loading {
@@ -443,6 +549,12 @@ onMounted(() => {
     
     .material-list {
       margin-top: 20px;
+    }
+
+    .material-pagination {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 16px;
     }
     
     .empty-data {

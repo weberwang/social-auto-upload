@@ -210,6 +210,98 @@ def upload_save():
             "data": None
         }), 500
 
+
+MATERIAL_VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi", ".mkv", ".m4v", ".webm", ".flv", ".wmv")
+MATERIAL_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+
+
+def extract_material_uuid(file_path: str | None) -> str:
+    """从素材存储路径中提取 UUID，兼容历史数据缺失或格式异常的情况。"""
+    if not file_path:
+        return ""
+
+    file_path_parts = file_path.split("_", 1)
+    if len(file_path_parts) == 0:
+        return ""
+    return file_path_parts[0]
+
+
+def serialize_material_row(row: sqlite3.Row) -> dict[str, object]:
+    """把 SQLite 行对象转换为前端素材记录，并补齐 UUID 字段。"""
+    row_dict = dict(row)
+    row_dict["uuid"] = extract_material_uuid(row_dict.get("file_path"))
+    return row_dict
+
+
+def parse_positive_int(value: str | None, default: int) -> int:
+    """解析正整数分页参数，非法值统一回退到默认值。"""
+    if value is None:
+        return default
+
+    try:
+        parsed_value = int(value)
+    except ValueError:
+        return default
+    if parsed_value < 1:
+        return default
+    return parsed_value
+
+
+def should_use_paginated_material_query(args) -> bool:
+    """判断当前请求是否进入分页查询分支，兼容旧版全量拉取调用。"""
+    return any(
+        args.get(parameter_name) is not None
+        for parameter_name in ("page", "page_size", "keyword", "material_type", "sort_by", "sort_order")
+    )
+
+
+def build_extension_like_clause(extensions: tuple[str, ...]) -> tuple[str, list[str]]:
+    """根据扩展名列表构造 SQL LIKE 片段，保证类型过滤与前端口径一致。"""
+    clause = " OR ".join("LOWER(filename) LIKE ?" for _ in extensions)
+    return f"({clause})", [f"%{extension}" for extension in extensions]
+
+
+def build_material_filter_clause(keyword: str | None, material_type: str | None) -> tuple[str, list[str]]:
+    """构造素材列表过滤条件，支持关键字与类型筛选。"""
+    where_clauses: list[str] = []
+    parameters: list[str] = []
+
+    normalized_keyword = (keyword or "").strip().lower()
+    if normalized_keyword:
+        where_clauses.append("LOWER(filename) LIKE ?")
+        parameters.append(f"%{normalized_keyword}%")
+
+    normalized_material_type = (material_type or "all").strip()
+    if normalized_material_type == "视频":
+        video_clause, video_parameters = build_extension_like_clause(MATERIAL_VIDEO_EXTENSIONS)
+        where_clauses.append(video_clause)
+        parameters.extend(video_parameters)
+    elif normalized_material_type == "图片":
+        image_clause, image_parameters = build_extension_like_clause(MATERIAL_IMAGE_EXTENSIONS)
+        where_clauses.append(image_clause)
+        parameters.extend(image_parameters)
+    elif normalized_material_type == "其他":
+        video_clause, video_parameters = build_extension_like_clause(MATERIAL_VIDEO_EXTENSIONS)
+        image_clause, image_parameters = build_extension_like_clause(MATERIAL_IMAGE_EXTENSIONS)
+        where_clauses.append(f"NOT ({video_clause} OR {image_clause})")
+        parameters.extend(video_parameters)
+        parameters.extend(image_parameters)
+
+    if not where_clauses:
+        return "", []
+    return f" WHERE {' AND '.join(where_clauses)}", parameters
+
+
+def build_material_order_clause(sort_by: str | None, sort_order: str | None) -> str:
+    """构造素材排序 SQL，仅允许白名单字段，避免排序参数注入。"""
+    sortable_columns = {
+        "upload_time": "upload_time",
+        "filesize": "filesize",
+    }
+    normalized_sort_by = sortable_columns.get((sort_by or "upload_time").strip(), "upload_time")
+    normalized_sort_order = "ASC" if (sort_order or "desc").strip().lower() == "asc" else "DESC"
+    return f"{normalized_sort_by} {normalized_sort_order}, id DESC"
+
 @app.route('/getFiles', methods=['GET'])
 def get_all_files():
     try:
@@ -218,29 +310,50 @@ def get_all_files():
             conn.row_factory = sqlite3.Row  # 允许通过列名访问结果
             cursor = conn.cursor()
 
-            # 查询所有记录
-            cursor.execute("SELECT * FROM file_records")
-            rows = cursor.fetchall()
+            if not should_use_paginated_material_query(request.args):
+                # 保留旧版全量返回行为，避免仪表盘和发布中心被这次分页改造联动打断。
+                cursor.execute("SELECT * FROM file_records")
+                rows = cursor.fetchall()
+                return jsonify({
+                    "code": 200,
+                    "msg": "success",
+                    "data": [serialize_material_row(row) for row in rows]
+                }), 200
 
-            # 将结果转为字典列表，并提取UUID
-            data = []
-            for row in rows:
-                row_dict = dict(row)
-                # 从 file_path 中提取 UUID (文件名的第一部分，下划线前)
-                if row_dict.get('file_path'):
-                    file_path_parts = row_dict['file_path'].split('_', 1)  # 只分割第一个下划线
-                    if len(file_path_parts) > 0:
-                        row_dict['uuid'] = file_path_parts[0]  # UUID 部分
-                    else:
-                        row_dict['uuid'] = ''
-                else:
-                    row_dict['uuid'] = ''
-                data.append(row_dict)
+            page = parse_positive_int(request.args.get("page"), 1)
+            page_size = parse_positive_int(request.args.get("page_size"), 20)
+            keyword = request.args.get("keyword")
+            material_type = request.args.get("material_type")
+            sort_by = request.args.get("sort_by")
+            sort_order = request.args.get("sort_order")
+            where_clause, filter_parameters = build_material_filter_clause(keyword, material_type)
+            order_clause = build_material_order_clause(sort_by, sort_order)
+
+            # 分页查询先查总数，再按页拉取明细，避免前端无法显示完整页码信息。
+            cursor.execute(
+                f"SELECT COUNT(*) AS total FROM file_records{where_clause}",
+                filter_parameters,
+            )
+            total_count = int(cursor.fetchone()["total"])
+            total_pages = 0 if total_count == 0 else (total_count + page_size - 1) // page_size
+            offset = (page - 1) * page_size
+
+            cursor.execute(
+                f"SELECT * FROM file_records{where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?",
+                [*filter_parameters, page_size, offset],
+            )
+            rows = cursor.fetchall()
 
             return jsonify({
                 "code": 200,
                 "msg": "success",
-                "data": data
+                "data": [serialize_material_row(row) for row in rows],
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total": total_count,
+                    "total_pages": total_pages,
+                }
             }), 200
     except Exception as e:
         return jsonify({
