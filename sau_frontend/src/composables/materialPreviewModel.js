@@ -6,7 +6,8 @@ export function createPreviewItemFromMaterial(material) {
     filename: material.filename,
     file_path: material.file_path,
     filesize: material.filesize,
-    upload_time: material.upload_time
+    upload_time: material.upload_time,
+    remark: material.remark || ''
   }
 }
 
@@ -19,6 +20,7 @@ export function createPreviewItemFromPublishFile(file) {
     filename: file.name,
     file_path: file.path,
     filesize: Number((file.size / (1024 * 1024)).toFixed(2)),
-    upload_time: ''
+    upload_time: '',
+    remark: file.remark || ''
   }
 }

@@ -13,6 +13,7 @@
           <span>类型：{{ getMaterialType(material.filename) }}</span>
           <span>大小：{{ material.filesize }} MB</span>
           <span v-if="material.upload_time">上传时间：{{ material.upload_time }}</span>
+          <span v-if="material.remark">备注：{{ material.remark }}</span>
         </div>
       </div>
       <el-skeleton v-if="previewLoading" :rows="8" animated />

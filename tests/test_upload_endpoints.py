@@ -40,13 +40,13 @@ class UploadEndpointTests(unittest.TestCase):
         self.assertEqual(saved_path.read_bytes(), b"video-bytes")
 
     def test_upload_save_creates_video_directory_and_persists_record(self):
-        """`/uploadSave` 需要同时完成文件保存和数据库记录写入。"""
+        """`/uploadSave` 需要同时完成文件保存、真实文件名保留和备注写入。"""
         with patch("sau_backend.BASE_DIR", self.base_dir):
             response = self.client.post(
                 "/uploadSave",
                 data={
                     "file": (BytesIO(b"video-bytes"), "sample.mp4"),
-                    "filename": "renamed-video",
+                    "remark": "首页主视觉素材",
                 },
                 content_type="multipart/form-data",
             )
@@ -61,12 +61,12 @@ class UploadEndpointTests(unittest.TestCase):
         with sqlite3.connect(self.base_dir / "db" / "database.db") as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT filename, file_path FROM file_records WHERE file_path = ?",
+                "SELECT filename, file_path, remark FROM file_records WHERE file_path = ?",
                 (payload["data"]["filepath"],),
             )
             record = cursor.fetchone()
 
-        self.assertEqual(record, ("renamed-video.mp4", payload["data"]["filepath"]))
+        self.assertEqual(record, ("sample.mp4", payload["data"]["filepath"], "首页主视觉素材"))
 
     def test_download_material_returns_attachment_response(self):
         """素材下载接口应以附件形式返回已上传文件，供预览弹窗回退下载。"""
@@ -138,22 +138,23 @@ class UploadEndpointTests(unittest.TestCase):
                     filename TEXT NOT NULL,
                     filesize REAL,
                     upload_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    file_path TEXT
+                    file_path TEXT,
+                    remark TEXT DEFAULT ''
                 )
                 """
             )
             conn.commit()
 
-    def _insert_material_record(self, filename, filesize, upload_time, file_path):
+    def _insert_material_record(self, filename, filesize, upload_time, file_path, remark=""):
         """向测试数据库写入素材记录，便于稳定校验分页与排序行为。"""
         with sqlite3.connect(self.base_dir / "db" / "database.db") as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO file_records (filename, filesize, upload_time, file_path)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO file_records (filename, filesize, upload_time, file_path, remark)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (filename, filesize, upload_time, file_path),
+                (filename, filesize, upload_time, file_path, remark),
             )
             conn.commit()
 

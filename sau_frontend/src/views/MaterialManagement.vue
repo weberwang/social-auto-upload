@@ -1,7 +1,14 @@
 <template>
   <div class="material-management">
     <div class="page-header">
-      <h1>素材管理</h1>
+      <div class="page-header__copy">
+        <h1>素材管理</h1>
+        <p>集中检索、筛选和维护已上传素材，保持运营素材库清晰可控。</p>
+      </div>
+      <div class="page-header__meta">
+        <span class="page-header__badge">{{ totalMaterials }} 条素材</span>
+        <span class="page-header__badge page-header__badge--muted">当前页 {{ materials.length }} 条</span>
+      </div>
     </div>
     
     <div class="material-list-container">
@@ -48,11 +55,34 @@
           </el-button>
         </div>
       </div>
-      
+
       <div v-if="materials.length > 0" class="material-list">
-        <el-table :data="materials" style="width: 100%">
-          <el-table-column prop="uuid" label="UUID" width="180" />
-          <el-table-column prop="filename" label="文件名" width="300" />
+        <el-table :data="materials" class="material-table" style="width: 100%">
+          <el-table-column label="UUID" width="220">
+            <template #default="scope">
+              <div class="material-cell material-cell--uuid">
+                <span>{{ scope.row.uuid }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="文件名" min-width="320">
+            <template #default="scope">
+              <div class="material-cell material-cell--filename">
+                <strong>{{ scope.row.filename }}</strong>
+                <span>{{ scope.row.file_path }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="备注" min-width="240" show-overflow-tooltip>
+            <template #default="scope">
+              <span
+                class="material-remark"
+                :class="{ 'material-remark--empty': !scope.row.remark }"
+              >
+                {{ scope.row.remark || '暂无备注' }}
+              </span>
+            </template>
+          </el-table-column>
           <el-table-column label="类型" width="110">
             <template #default="scope">
               <el-tag :type="getFileTypeTag(scope.row.filename)" effect="plain" size="small">
@@ -65,15 +95,18 @@
               {{ scope.row.filesize }} MB
             </template>
           </el-table-column>
-          <el-table-column prop="upload_time" label="上传时间" width="180" />
-          <el-table-column label="操作">
+          <el-table-column prop="upload_time" label="上传时间" min-width="180" />
+          <el-table-column label="操作" width="140" align="right">
             <template #default="scope">
-              <el-button size="small" @click="handlePreview(scope.row)">预览</el-button>
-              <el-button size="small" type="danger" @click="handleDelete(scope.row)">删除</el-button>
+              <div class="material-actions">
+                <el-button size="small" @click="handlePreview(scope.row)">预览</el-button>
+                <el-button size="small" type="danger" @click="handleDelete(scope.row)">删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
         <div class="material-pagination">
+          <span class="material-pagination__summary">{{ paginationSummary }}</span>
           <el-pagination
             background
             layout="total, sizes, prev, pager, next, jumper"
@@ -101,14 +134,6 @@
     >
       <div class="upload-form">
         <el-form label-width="80px">
-          <el-form-item label="文件名称:">
-            <el-input
-              v-model="customFilename"
-              placeholder="选填 (仅单个文件时生效)"
-              :disabled="customFilenameDisabled"
-              clearable
-            />
-          </el-form-item>
           <el-form-item label="选择文件">
             <el-upload
               class="upload-demo"
@@ -135,6 +160,15 @@
             <div class="upload-file-list">
               <div v-for="file in fileList" :key="file.uid" class="upload-file-item">
                 <span class="file-name">{{ file.name }}</span>
+                <el-input
+                  v-model="fileRemarks[file.uid]"
+                  type="textarea"
+                  :rows="2"
+                  maxlength="100"
+                  show-word-limit
+                  placeholder="请输入素材备注（选填）"
+                  class="upload-file-item__remark"
+                />
                 <el-progress
                   :percentage="uploadProgress[file.uid]?.percentage || 0"
                   :text-inside="true"
@@ -166,7 +200,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { Refresh, Upload } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { materialApi } from '@/api/material'
@@ -177,6 +211,10 @@ import {
   MATERIAL_TYPE_FILTER_OPTIONS,
   buildMaterialListQueryParams
 } from '@/composables/materialListQuery.js'
+import {
+  buildMaterialUploadFormData,
+  syncMaterialRemarks
+} from '@/composables/materialUploadForm.js'
 import { summarizeMaterialUploadResults } from '@/composables/materialUploadBatch.js'
 import { useMaterialPreviewDialog } from '@/composables/useMaterialPreviewDialog.js'
 import { useAppStore } from '@/stores/app'
@@ -216,6 +254,13 @@ const materialSortOptions = MATERIAL_SORT_OPTIONS
  */
 const materialPageSizeOptions = MATERIAL_PAGE_SIZE_OPTIONS
 
+/**
+ * 分页区文案单独抽离，避免模板里堆叠字符串拼接逻辑。
+ */
+const paginationSummary = computed(() => (
+  `第 ${currentPage.value} 页，共 ${Math.max(1, Math.ceil(totalMaterials.value / pageSize.value) || 1)} 页`
+))
+
 // 对话框控制
 const uploadDialogVisible = ref(false)
 const {
@@ -226,17 +271,8 @@ const {
 
 // 文件上传
 const fileList = ref([])
-const customFilename = ref('')
-const customFilenameDisabled = computed(() => fileList.value.length > 1)
+const fileRemarks = ref({})
 const uploadProgress = ref({}); // { [uid]: { percentage: 0, speed: '' } }
-
-
-watch(fileList, (newList) => {
-  if (newList.length <= 1) {
-    // If you want to clear the custom name when going back to single file, uncomment below
-    // customFilename.value = ''
-  }
-});
 
 
 // 获取素材列表
@@ -315,7 +351,7 @@ const invalidateMaterialCache = () => {
 const handleUploadMaterial = () => {
   // 清空变量
   fileList.value = []
-  customFilename.value = ''
+  fileRemarks.value = {}
   uploadProgress.value = {};
   uploadDialogVisible.value = true
 }
@@ -323,13 +359,14 @@ const handleUploadMaterial = () => {
 // 关闭上传对话框时清空变量
 const handleUploadDialogClose = () => {
   fileList.value = []
-  customFilename.value = ''
+  fileRemarks.value = {}
   uploadProgress.value = {};
 }
 
 // 文件选择变更
 const handleFileChange = (file, uploadFileList) => {
   fileList.value = uploadFileList;
+  fileRemarks.value = syncMaterialRemarks(uploadFileList, fileRemarks.value)
   const newProgress = {};
   for (const f of uploadFileList) {
     newProgress[f.uid] = { percentage: 0, speed: '' };
@@ -339,6 +376,7 @@ const handleFileChange = (file, uploadFileList) => {
 
 const handleFileRemove = (file, uploadFileList) => {
   fileList.value = uploadFileList;
+  fileRemarks.value = syncMaterialRemarks(uploadFileList, fileRemarks.value)
   const newProgress = { ...uploadProgress.value };
   delete newProgress[file.uid];
   uploadProgress.value = newProgress;
@@ -362,14 +400,12 @@ const submitUpload = async () => {
         uploadResults.push({ status: 'failure' })
         continue
       }
-      
-      const formData = new FormData()
-      formData.append('file', file.raw)
-      
-      // 只有当只有一个文件时，自定义文件名才生效
-      if (fileList.value.length === 1 && customFilename.value.trim()) {
-        formData.append('filename', customFilename.value.trim())
-      }
+
+      // 上传表单只提交原始文件和对应备注，避免继续暴露前端自定义文件名能力。
+      const formData = buildMaterialUploadFormData({
+        file,
+        remark: fileRemarks.value[file.uid] || ''
+      })
       
       let lastLoaded = 0;
       let lastTime = Date.now();
@@ -496,30 +532,87 @@ onMounted(() => {
 }
 
 .material-management {
+  padding: 8px 0 24px;
+  min-height: calc(100dvh - 40px);
+  display: flex;
+  flex-direction: column;
   
   .page-header {
-    margin-bottom: 20px;
-    
-    h1 {
-      font-size: 24px;
-      font-weight: 500;
-      color: $text-primary;
-      margin: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 20px;
+    margin-bottom: 24px;
+
+    .page-header__copy {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+
+      h1 {
+        font-size: 30px;
+        font-weight: 600;
+        letter-spacing: -0.03em;
+        color: $text-primary;
+        margin: 0;
+      }
+
+      p {
+        margin: 0;
+        max-width: 620px;
+        font-size: $font-size-base;
+        line-height: 1.7;
+        color: $text-secondary;
+      }
+    }
+
+    .page-header__meta {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .page-header__badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 38px;
+      padding: 0 16px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, rgba(64, 158, 255, 0.16), rgba(64, 158, 255, 0.08));
+      color: $primary-color;
+      font-size: $font-size-small;
+      font-weight: 600;
+    }
+
+    .page-header__badge--muted {
+      background: $bg-color;
+      border: 1px solid $border-light;
+      color: $text-regular;
     }
   }
   
   .material-list-container {
-    background-color: #fff;
-    border-radius: 4px;
-    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
-    padding: 20px;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+    border: 1px solid rgba(228, 231, 237, 0.9);
+    border-radius: 18px;
+    box-shadow: 0 20px 40px rgba(15, 23, 42, 0.06);
+    padding: 22px;
     
     .material-search {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 16px;
-      margin-bottom: 20px;
+      margin-bottom: 18px;
+      padding: 14px;
+      border: 1px solid rgba(228, 231, 237, 0.9);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.84);
       
       .material-search__filters {
         display: flex;
@@ -528,7 +621,7 @@ onMounted(() => {
         gap: 12px;
 
         .el-input {
-          width: 300px;
+          width: 320px;
         }
 
         .el-select {
@@ -546,19 +639,120 @@ onMounted(() => {
         }
       }
     }
-    
+
     .material-list {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      min-height: 0;
       margin-top: 20px;
     }
 
     .material-pagination {
       display: flex;
+      position: sticky;
+      bottom: 0;
+      z-index: 5;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: auto;
+      padding-top: 16px;
+      padding-bottom: 4px;
+      background: linear-gradient(180deg, rgba(248, 250, 252, 0.78), rgba(255, 255, 255, 0.98) 28%);
+      backdrop-filter: blur(10px);
+      border-top: 1px solid rgba(228, 231, 237, 0.9);
+      box-shadow: 0 -12px 30px rgba(15, 23, 42, 0.04);
+    }
+
+    .material-pagination__summary {
+      font-size: $font-size-small;
+      color: $text-secondary;
+    }
+
+    .material-table {
+      border: 1px solid rgba(228, 231, 237, 0.92);
+      border-radius: 18px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.9);
+    }
+
+    :deep(.material-table th.el-table__cell) {
+      height: 58px;
+      background: #f8fafc;
+      color: #64748b;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    :deep(.material-table td.el-table__cell) {
+      padding-top: 18px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid rgba(241, 245, 249, 0.96);
+      vertical-align: top;
+    }
+
+    :deep(.material-table .el-table__row:hover > td.el-table__cell) {
+      background: rgba(248, 250, 252, 0.96);
+    }
+
+    .material-cell {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .material-cell--uuid {
+      font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.7;
+      color: #64748b;
+      word-break: break-all;
+    }
+
+    .material-cell--filename {
+      strong {
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1.5;
+        color: $text-primary;
+        word-break: break-all;
+      }
+
+      span {
+        font-size: 12px;
+        line-height: 1.6;
+        color: #94a3b8;
+        word-break: break-all;
+      }
+    }
+
+    .material-remark {
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      padding: 8px 12px;
+      border-radius: 12px;
+      background: #f8fafc;
+      color: $text-regular;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .material-remark--empty {
+      color: #94a3b8;
+      background: #f1f5f9;
+    }
+
+    .material-actions {
+      display: flex;
       justify-content: flex-end;
-      margin-top: 16px;
+      gap: 8px;
     }
     
     .empty-data {
-      padding: 40px 0;
+      padding: 56px 0 44px;
     }
   }
   
@@ -673,8 +867,67 @@ onMounted(() => {
 .upload-file-item .file-name {
   font-size: 14px;
   color: #606266;
-  margin-bottom: 5px;
+  margin-bottom: 10px;
   display: block;
+}
+
+.upload-file-item__remark {
+  margin-bottom: 10px;
+}
+
+@media (max-width: 1200px) {
+  .material-management {
+    .page-header {
+      flex-direction: column;
+      align-items: flex-start;
+
+      .page-header__meta {
+        justify-content: flex-start;
+      }
+    }
+  }
+}
+
+@media (max-width: 768px) {
+  .material-management {
+    .page-header {
+      .page-header__copy {
+        h1 {
+          font-size: 26px;
+        }
+      }
+    }
+
+    .material-list-container {
+      padding: 16px;
+      border-radius: 16px;
+
+      .material-search {
+        flex-direction: column;
+        align-items: stretch;
+
+        .material-search__filters {
+          .el-input,
+          .el-select {
+            width: 100%;
+          }
+        }
+
+        .action-buttons {
+          width: 100%;
+
+          .el-button {
+            flex: 1;
+          }
+        }
+      }
+
+      .material-pagination {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  }
 }
 
 /* 覆盖Element Plus对话框样式 */

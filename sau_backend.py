@@ -8,6 +8,14 @@ from pathlib import Path
 from queue import Queue
 from flask_cors import CORS
 from myUtils.auth import check_cookie
+from myUtils.material_records import (
+    build_material_filter_clause,
+    build_material_order_clause,
+    ensure_file_records_schema,
+    parse_positive_int,
+    serialize_material_row,
+    should_use_paginated_material_query,
+)
 from flask import Flask, request, jsonify, Response, render_template, send_from_directory, g
 from werkzeug.utils import secure_filename
 from conf import BASE_DIR
@@ -163,12 +171,8 @@ def upload_save():
             "msg": "No selected file"
         }), 400
 
-    # 获取表单中的自定义文件名（可选）
-    custom_filename = request.form.get('filename', None)
-    if custom_filename:
-        filename = secure_filename(custom_filename + "." + file.filename.split('.')[-1])
-    else:
-        filename = secure_filename(file.filename)
+    remark = (request.form.get('remark') or '').strip()
+    filename = secure_filename(file.filename)
     if not filename:
         return jsonify({"code": 400, "data": None, "msg": "Invalid filename"}), 400
 
@@ -185,11 +189,12 @@ def upload_save():
         file.save(filepath)
 
         with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
+            ensure_file_records_schema(conn)
             cursor = conn.cursor()
             cursor.execute('''
-                                INSERT INTO file_records (filename, filesize, file_path)
-            VALUES (?, ?, ?)
-                                ''', (filename, round(float(os.path.getsize(filepath)) / (1024 * 1024),2), final_filename))
+                                INSERT INTO file_records (filename, filesize, file_path, remark)
+            VALUES (?, ?, ?, ?)
+                                ''', (filename, round(float(os.path.getsize(filepath)) / (1024 * 1024),2), final_filename, remark))
             conn.commit()
             print("✅ 上传文件已记录")
 
@@ -198,7 +203,8 @@ def upload_save():
             "msg": "File uploaded and saved successfully",
             "data": {
                 "filename": filename,
-                "filepath": final_filename
+                "filepath": final_filename,
+                "remark": remark
             }
         }), 200
 
@@ -210,104 +216,13 @@ def upload_save():
             "data": None
         }), 500
 
-
-MATERIAL_VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi", ".mkv", ".m4v", ".webm", ".flv", ".wmv")
-MATERIAL_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
-
-
-def extract_material_uuid(file_path: str | None) -> str:
-    """从素材存储路径中提取 UUID，兼容历史数据缺失或格式异常的情况。"""
-    if not file_path:
-        return ""
-
-    file_path_parts = file_path.split("_", 1)
-    if len(file_path_parts) == 0:
-        return ""
-    return file_path_parts[0]
-
-
-def serialize_material_row(row: sqlite3.Row) -> dict[str, object]:
-    """把 SQLite 行对象转换为前端素材记录，并补齐 UUID 字段。"""
-    row_dict = dict(row)
-    row_dict["uuid"] = extract_material_uuid(row_dict.get("file_path"))
-    return row_dict
-
-
-def parse_positive_int(value: str | None, default: int) -> int:
-    """解析正整数分页参数，非法值统一回退到默认值。"""
-    if value is None:
-        return default
-
-    try:
-        parsed_value = int(value)
-    except ValueError:
-        return default
-    if parsed_value < 1:
-        return default
-    return parsed_value
-
-
-def should_use_paginated_material_query(args) -> bool:
-    """判断当前请求是否进入分页查询分支，兼容旧版全量拉取调用。"""
-    return any(
-        args.get(parameter_name) is not None
-        for parameter_name in ("page", "page_size", "keyword", "material_type", "sort_by", "sort_order")
-    )
-
-
-def build_extension_like_clause(extensions: tuple[str, ...]) -> tuple[str, list[str]]:
-    """根据扩展名列表构造 SQL LIKE 片段，保证类型过滤与前端口径一致。"""
-    clause = " OR ".join("LOWER(filename) LIKE ?" for _ in extensions)
-    return f"({clause})", [f"%{extension}" for extension in extensions]
-
-
-def build_material_filter_clause(keyword: str | None, material_type: str | None) -> tuple[str, list[str]]:
-    """构造素材列表过滤条件，支持关键字与类型筛选。"""
-    where_clauses: list[str] = []
-    parameters: list[str] = []
-
-    normalized_keyword = (keyword or "").strip().lower()
-    if normalized_keyword:
-        where_clauses.append("LOWER(filename) LIKE ?")
-        parameters.append(f"%{normalized_keyword}%")
-
-    normalized_material_type = (material_type or "all").strip()
-    if normalized_material_type == "视频":
-        video_clause, video_parameters = build_extension_like_clause(MATERIAL_VIDEO_EXTENSIONS)
-        where_clauses.append(video_clause)
-        parameters.extend(video_parameters)
-    elif normalized_material_type == "图片":
-        image_clause, image_parameters = build_extension_like_clause(MATERIAL_IMAGE_EXTENSIONS)
-        where_clauses.append(image_clause)
-        parameters.extend(image_parameters)
-    elif normalized_material_type == "其他":
-        video_clause, video_parameters = build_extension_like_clause(MATERIAL_VIDEO_EXTENSIONS)
-        image_clause, image_parameters = build_extension_like_clause(MATERIAL_IMAGE_EXTENSIONS)
-        where_clauses.append(f"NOT ({video_clause} OR {image_clause})")
-        parameters.extend(video_parameters)
-        parameters.extend(image_parameters)
-
-    if not where_clauses:
-        return "", []
-    return f" WHERE {' AND '.join(where_clauses)}", parameters
-
-
-def build_material_order_clause(sort_by: str | None, sort_order: str | None) -> str:
-    """构造素材排序 SQL，仅允许白名单字段，避免排序参数注入。"""
-    sortable_columns = {
-        "upload_time": "upload_time",
-        "filesize": "filesize",
-    }
-    normalized_sort_by = sortable_columns.get((sort_by or "upload_time").strip(), "upload_time")
-    normalized_sort_order = "ASC" if (sort_order or "desc").strip().lower() == "asc" else "DESC"
-    return f"{normalized_sort_by} {normalized_sort_order}, id DESC"
-
 @app.route('/getFiles', methods=['GET'])
 def get_all_files():
     try:
         # 使用 with 自动管理数据库连接
         with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
             conn.row_factory = sqlite3.Row  # 允许通过列名访问结果
+            ensure_file_records_schema(conn)
             cursor = conn.cursor()
 
             if not should_use_paginated_material_query(request.args):

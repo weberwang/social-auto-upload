@@ -11,14 +11,16 @@ test('素材记录应转换为共享预览对象', () => {
     filename: 'demo.mp4',
     file_path: 'uuid_demo.mp4',
     filesize: 12.34,
-    upload_time: '2026-06-06 20:00:00'
+    upload_time: '2026-06-06 20:00:00',
+    remark: '首页主视觉'
   })
 
   assert.deepEqual(result, {
     filename: 'demo.mp4',
     file_path: 'uuid_demo.mp4',
     filesize: 12.34,
-    upload_time: '2026-06-06 20:00:00'
+    upload_time: '2026-06-06 20:00:00',
+    remark: '首页主视觉'
   })
 })
 
@@ -33,6 +35,7 @@ test('发布中心文件应转换为共享预览对象并换算大小', () => {
     filename: 'demo.mp4',
     file_path: 'uuid_demo.mp4',
     filesize: 3.5,
-    upload_time: ''
+    upload_time: '',
+    remark: ''
   })
 })
