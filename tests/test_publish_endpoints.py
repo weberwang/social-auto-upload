@@ -58,6 +58,42 @@ class PublishEndpointTests(unittest.TestCase):
         self.assertIn("不支持图文发布", response.get_json()["msg"])
         mock_post_note.assert_not_called()
 
+    def test_post_video_accepts_tencent_video_with_base_and_platform_fields(self):
+        """统一请求结构中的基础字段和视频号增强字段应被历史接口接受。"""
+
+        payload = {
+            "type": 2,
+            "contentType": "video",
+            "baseFields": {
+                "title": "视频标题",
+                "description": "视频简介",
+                "noteContent": "",
+                "tags": ["旅行"],
+                "enableTimer": 1,
+                "videosPerDay": 1,
+                "dailyTimes": ["10:00"],
+                "startDays": 0,
+            },
+            "platformFields": {
+                "tencent": {
+                    "collectionName": "旅行合集",
+                    "declareOriginal": True,
+                    "originalType": "生活",
+                    "contentDeclaration": "无需声明",
+                    "isDraft": True,
+                }
+            },
+            "fileList": ["video-a.mp4"],
+            "accountList": ["tencent_creator.json"],
+        }
+
+        with patch("myUtils.web_publish.post_video_tencent") as mock_post_video:
+            response = self.client.post("/postVideo", json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["code"], 200)
+        mock_post_video.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

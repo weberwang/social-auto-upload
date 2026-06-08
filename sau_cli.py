@@ -41,6 +41,7 @@ from uploader.ks_uploader.main import (
 from uploader.tencent_uploader.main import (
     TENCENT_PUBLISH_STRATEGY_IMMEDIATE,
     TENCENT_PUBLISH_STRATEGY_SCHEDULED,
+    TencentNote,
     TencentVideo,
     tencent_setup,
 )
@@ -164,6 +165,26 @@ class TencentVideoUploadRequest:
     thumbnail_portrait_file: Path | None = None
     short_title: str | None = None
     category: str | None = None
+    is_draft: bool = False
+    publish_strategy: str = TENCENT_PUBLISH_STRATEGY_IMMEDIATE
+    debug: bool = True
+    headless: bool = True
+
+
+@dataclass(slots=True)
+class TencentNoteUploadRequest:
+    """视频号图文上传请求。"""
+
+    account_name: str
+    image_files: list[Path]
+    title: str
+    note: str
+    tags: list[str]
+    publish_date: datetime | int
+    collection_name: str = ""
+    declare_original: bool = False
+    original_type: str = ""
+    content_declaration: str = ""
     is_draft: bool = False
     publish_strategy: str = TENCENT_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
@@ -405,6 +426,37 @@ async def upload_tencent_video(request: TencentVideoUploadRequest) -> Path:
     return account_file
 
 
+async def upload_tencent_note(request: TencentNoteUploadRequest) -> Path:
+    """执行视频号图文上传。"""
+
+    account_file = resolve_account_file("tencent", request.account_name)
+    is_ready = await tencent_setup(str(account_file), handle=False)
+    if not is_ready:
+        raise RuntimeError(
+            f"Tencent/WeChat Channels cookie is missing or expired: {account_file}. "
+            f"Run `sau tencent login --account {request.account_name}` first."
+        )
+
+    app = TencentNote(
+        image_paths=[str(path) for path in request.image_files],
+        note=request.note,
+        tags=request.tags,
+        publish_date=request.publish_date,
+        account_file=str(account_file),
+        title=request.title,
+        is_draft=request.is_draft,
+        publish_strategy=request.publish_strategy,
+        debug=request.debug,
+        headless=request.headless,
+    )
+    app.collection_name = request.collection_name
+    app.declare_original = request.declare_original
+    app.original_type = request.original_type
+    app.content_declaration = request.content_declaration
+    await app.tencent_upload_note()
+    return account_file
+
+
 def existing_file_path(value: str) -> Path:
     path = Path(value)
     if not path.is_file():
@@ -564,6 +616,20 @@ def build_parser() -> argparse.ArgumentParser:
     tencent_upload_video_parser.add_argument("--category", help="Optional original content category")
     tencent_upload_video_parser.add_argument("--draft", action="store_true", help="Save as draft instead of publishing")
     add_runtime_flags(tencent_upload_video_parser)
+
+    tencent_upload_note_parser = tencent_actions.add_parser("upload-note", help="Upload one note to WeChat Channels")
+    tencent_upload_note_parser.add_argument("--account", required=True, help="Tencent user-defined account_name")
+    tencent_upload_note_parser.add_argument("--images", required=True, nargs="+", type=existing_file_path, help="Image file paths")
+    tencent_upload_note_parser.add_argument("--title", required=True, help="Note title")
+    tencent_upload_note_parser.add_argument("--note", default="", help="Optional note content")
+    tencent_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
+    tencent_upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    tencent_upload_note_parser.add_argument("--collection-name", default="", help="Optional WeChat Channels collection name")
+    tencent_upload_note_parser.add_argument("--declare-original", action="store_true", help="Declare note as original content")
+    tencent_upload_note_parser.add_argument("--original-type", default="", help="Optional original content type")
+    tencent_upload_note_parser.add_argument("--content-declaration", default="", help="Optional content declaration text")
+    tencent_upload_note_parser.add_argument("--draft", action="store_true", help="Save as draft instead of publishing")
+    add_runtime_flags(tencent_upload_note_parser)
     return parser
 
 
@@ -768,6 +834,27 @@ async def dispatch(args: argparse.Namespace) -> int:
             )
             await upload_tencent_video(request)
             print(f"Tencent/WeChat Channels video upload submitted: {request.video_file}")
+            return 0
+
+        if args.action == "upload-note":
+            request = TencentNoteUploadRequest(
+                account_name=args.account,
+                image_files=parse_image_files(args.images),
+                title=args.title,
+                note=args.note,
+                tags=parse_tags(args.tags),
+                publish_date=args.schedule or 0,
+                collection_name=args.collection_name,
+                declare_original=args.declare_original,
+                original_type=args.original_type,
+                content_declaration=args.content_declaration,
+                is_draft=args.draft,
+                publish_strategy=publish_strategy,
+                debug=args.debug,
+                headless=args.headless,
+            )
+            await upload_tencent_note(request)
+            print(f"Tencent/WeChat Channels note upload submitted: {len(request.image_files)} images")
             return 0
 
         raise RuntimeError(f"Unsupported Tencent/WeChat Channels action: {args.action}")

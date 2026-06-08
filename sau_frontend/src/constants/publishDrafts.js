@@ -1,12 +1,8 @@
+import { buildDisplayFileList } from '@/constants/publishMaterials'
 import {
-  buildPublishTabLabel,
-  createDefaultPublishTab,
-  resolveSupportedContentType
-} from '@/constants/publishPlatforms'
-import {
-  PUBLISH_CONTENT_TYPE_IMAGE_TEXT,
-  buildDisplayFileList
-} from '@/constants/publishMaterials'
+  flattenPublishTabState,
+  migrateLegacyPublishTab
+} from '@/constants/publishTabState'
 
 const DEFAULT_DRAFT_VERSION = 1
 
@@ -33,12 +29,13 @@ export function buildDefaultDraftName() {
  * 把单个 Tab 规整成可持久化的草稿对象，去掉运行态字段并补齐展示字段。
  */
 export function serializePublishTab(tab) {
-  const clonedTab = clonePlainObject(tab)
+  const migratedTab = migrateLegacyPublishTab(clonePlainObject(tab), 0)
   return {
-    ...clonedTab,
+    ...migratedTab,
+    state: flattenPublishTabState(migratedTab).state,
     publishStatus: null,
     publishing: false,
-    displayFileList: buildDisplayFileList(clonedTab.fileList || [])
+    displayFileList: buildDisplayFileList(migratedTab.fileList || [])
   }
 }
 
@@ -58,43 +55,7 @@ export function buildPublishDraftWorkspace(tabs, activeTab, tabCounter) {
  * 把草稿里的单个 Tab 恢复为页面可直接使用的表单状态。
  */
 export function restorePublishTab(rawTab, index) {
-  const defaultTab = createDefaultPublishTab()
-  const safeTab = rawTab && typeof rawTab === 'object' ? clonePlainObject(rawTab) : {}
-  const restoredTab = {
-    ...defaultTab,
-    ...safeTab,
-    name: safeTab.name || `tab${index + 1}`,
-    label: safeTab.label || defaultTab.label,
-    publishStatus: null,
-    publishing: false,
-    selectedPlatform: Number(safeTab.selectedPlatform) || defaultTab.selectedPlatform
-  }
-
-  restoredTab.contentType = resolveSupportedContentType(
-    restoredTab.selectedPlatform,
-    restoredTab.contentType || defaultTab.contentType
-  )
-  restoredTab.fileList = Array.isArray(restoredTab.fileList) ? restoredTab.fileList : []
-  restoredTab.displayFileList = buildDisplayFileList(restoredTab.fileList)
-  restoredTab.selectedAccounts = Array.isArray(restoredTab.selectedAccounts)
-    ? restoredTab.selectedAccounts
-    : []
-  restoredTab.selectedTopics = Array.isArray(restoredTab.selectedTopics)
-    ? restoredTab.selectedTopics
-    : []
-  restoredTab.dailyTimes = Array.isArray(restoredTab.dailyTimes) && restoredTab.dailyTimes.length > 0
-    ? restoredTab.dailyTimes
-    : ['10:00']
-  restoredTab.label = buildPublishTabLabel(
-    restoredTab.selectedPlatform,
-    restoredTab.selectedAccounts,
-  )
-
-  if (restoredTab.contentType !== PUBLISH_CONTENT_TYPE_IMAGE_TEXT) {
-    restoredTab.noteContent = ''
-  }
-
-  return restoredTab
+  return flattenPublishTabState(migrateLegacyPublishTab(rawTab, index))
 }
 
 /**

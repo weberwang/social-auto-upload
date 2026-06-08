@@ -5,6 +5,7 @@ import {
   createCopiedPublishTab,
   createCopiedPublishTabsForPlatforms
 } from '../src/constants/publishTabCopy.js'
+import { migrateLegacyPublishTab } from '../src/constants/publishTabState.js'
 import {
   PUBLISH_CONTENT_TYPE_IMAGE_TEXT,
   PUBLISH_CONTENT_TYPE_VIDEO
@@ -139,6 +140,22 @@ test('复制到非平台专属能力页时应清空平台专属字段', () => {
   assert.equal(copiedTab.productLink, '')
   assert.equal(copiedTab.productTitle, '')
   assert.equal(copiedTab.isDraft, false)
+})
+
+test('复制入口应兼容旧草稿迁移后的统一状态模型', () => {
+  const migratedTab = migrateLegacyPublishTab(
+    buildSourceTab({
+      selectedPlatform: 5,
+      description: 'B站简介',
+      bilibiliTid: 17
+    }),
+    0
+  )
+  const copiedTab = createCopiedPublishTab(migratedTab, 5, 4)
+
+  assert.equal(copiedTab.selectedPlatform, 5)
+  assert.equal(copiedTab.description, 'B站简介')
+  assert.equal(copiedTab.bilibiliTid, 17)
 })
 
 test('复制内容时不应带入未知运行态字段', () => {

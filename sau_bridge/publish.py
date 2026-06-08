@@ -30,6 +30,11 @@ class PublishNotePayload:
     note: str
     tags: list[str]
     schedule: str | None = None
+    collection_name: str = ""
+    declare_original: bool = False
+    original_type: str = ""
+    content_declaration: str = ""
+    is_draft: bool = False
 
 
 def _require_non_empty_string(field_name: str, value: object) -> str:
@@ -93,6 +98,11 @@ def _parse_note_payload(payload: object) -> PublishNotePayload:
         note=_require_non_empty_string("note", payload.get("note")),
         tags=_parse_tags(payload.get("tags")),
         schedule=_parse_optional_schedule(payload.get("schedule")),
+        collection_name=str(payload.get("collection_name") or ""),
+        declare_original=bool(payload.get("declare_original", False)),
+        original_type=str(payload.get("original_type") or ""),
+        content_declaration=str(payload.get("content_declaration") or ""),
+        is_draft=bool(payload.get("is_draft", False)),
     )
 
 
@@ -225,6 +235,25 @@ async def run_publish_note(payload: object) -> dict[str, Any]:
                 note=request.note,
                 tags=request.tags,
                 publish_date=publish_date,
+            )
+        )
+    elif request.platform == "tencent":
+        from sau_cli import TencentNoteUploadRequest, parse_schedule, upload_tencent_note
+
+        publish_date = parse_schedule(request.schedule) if request.schedule else 0
+        account_file = await upload_tencent_note(
+            TencentNoteUploadRequest(
+                account_name=request.account_name,
+                image_files=request.image_files,
+                title=request.title,
+                note=request.note,
+                tags=request.tags,
+                publish_date=publish_date,
+                collection_name=request.collection_name,
+                declare_original=request.declare_original,
+                original_type=request.original_type,
+                content_declaration=request.content_declaration,
+                is_draft=request.is_draft,
             )
         )
     else:

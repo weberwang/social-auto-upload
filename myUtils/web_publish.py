@@ -54,6 +54,7 @@ class WebPublishRequest:
     product_title: str
     thumbnail_path: str
     is_draft: bool
+    platform_fields: dict[str, object]
 
 
 def _require_payload_object(payload: object) -> dict[str, object]:
@@ -116,23 +117,49 @@ def _get_string_tuple(payload: dict[str, object], key: str) -> tuple[str, ...]:
     return tuple(str(item).strip() for item in raw_value if str(item).strip())
 
 
+def _get_object(payload: dict[str, object], key: str) -> dict[str, object]:
+    """读取可选对象字段；新旧请求结构并存时统一走这里兜底。"""
+
+    raw_value = payload.get(key)
+    return raw_value if isinstance(raw_value, dict) else {}
+
+
+def _pick_int(*values: object) -> int | None:
+    """按优先级挑选整数值，避免新旧字段并存时重复写转换逻辑。"""
+
+    for raw_value in values:
+        if raw_value is None or str(raw_value).strip() == "":
+            continue
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def parse_web_publish_request(payload: object) -> WebPublishRequest:
     """把历史 Web 发布请求解析为强类型对象。"""
 
     request_payload = _require_payload_object(payload)
+    base_fields = _get_object(request_payload, "baseFields")
+    platform_fields = _get_object(request_payload, "platformFields")
+    douyin_platform_fields = platform_fields.get("douyin")
+    bilibili_platform_fields = platform_fields.get("bilibili")
+    tencent_platform_fields = platform_fields.get("tencent")
     platform_type = _get_int(request_payload, "type")
     if platform_type is None:
         raise PublishRequestError("平台类型不能为空")
     if platform_type not in PLATFORM_NAME_BY_TYPE:
         raise PublishRequestError(f"不支持的平台类型: {platform_type}")
 
-    title = _get_string(request_payload, "title")
+    field_source = base_fields if base_fields else request_payload
+    title = _get_string(field_source, "title")
     if not title:
         raise PublishRequestError("标题不能为空")
 
     content_type = _get_content_type(request_payload)
-    description = _get_string(request_payload, "description")
-    note_content = _get_string(request_payload, "noteContent")
+    description = _get_string(field_source, "description")
+    note_content = _get_string(field_source, "noteContent")
     if content_type == IMAGE_TEXT_CONTENT_TYPE and not note_content:
         # 兼容旧字段，避免前端切换过程中短时间内仍传 description。
         note_content = description
@@ -143,21 +170,35 @@ def parse_web_publish_request(payload: object) -> WebPublishRequest:
         file_list=_require_non_empty_string_list(request_payload, "fileList", "文件列表不能为空"),
         account_list=_require_non_empty_string_list(request_payload, "accountList", "账号列表不能为空"),
         title=title,
-        tags=_get_string_tuple(request_payload, "tags"),
+        tags=_get_string_tuple(field_source, "tags"),
         description=description,
         note_content=note_content,
-        tid=_get_int(request_payload, "tid"),
+        tid=_pick_int(
+            bilibili_platform_fields.get("tid") if isinstance(bilibili_platform_fields, dict) else None,
+            request_payload.get("tid"),
+        ),
         category=_get_int(request_payload, "category"),
-        enable_timer=request_payload.get("enableTimer", False),
-        videos_per_day=_get_int(request_payload, "videosPerDay"),
-        daily_times=tuple(str(item).strip() for item in request_payload.get("dailyTimes", []) if str(item).strip())
-        if isinstance(request_payload.get("dailyTimes", []), list)
+        enable_timer=field_source.get("enableTimer", request_payload.get("enableTimer", False)),
+        videos_per_day=_pick_int(field_source.get("videosPerDay"), request_payload.get("videosPerDay")),
+        daily_times=tuple(str(item).strip() for item in field_source.get("dailyTimes", []) if str(item).strip())
+        if isinstance(field_source.get("dailyTimes", []), list)
         else tuple(),
-        start_days=_get_int(request_payload, "startDays"),
-        product_link=_get_string(request_payload, "productLink"),
-        product_title=_get_string(request_payload, "productTitle"),
+        start_days=_pick_int(field_source.get("startDays"), request_payload.get("startDays")),
+        product_link=_get_string(
+            douyin_platform_fields if isinstance(douyin_platform_fields, dict) else request_payload,
+            "productLink",
+        ),
+        product_title=_get_string(
+            douyin_platform_fields if isinstance(douyin_platform_fields, dict) else request_payload,
+            "productTitle",
+        ),
         thumbnail_path=_get_string(request_payload, "thumbnail"),
-        is_draft=bool(request_payload.get("isDraft", False)),
+        is_draft=bool(
+            tencent_platform_fields.get("isDraft")
+            if isinstance(tencent_platform_fields, dict) and "isDraft" in tencent_platform_fields
+            else request_payload.get("isDraft", False)
+        ),
+        platform_fields=platform_fields,
     )
     validate_web_publish_request(publish_request)
     return publish_request

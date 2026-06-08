@@ -168,19 +168,11 @@
             </el-radio-group>
           </div>
 
-          <div class="original-section">
+          <div v-if="tab.selectedPlatform !== 2" class="original-section">
             <el-checkbox
               v-model="tab.isOriginal"
               label="声明原创"
               class="original-checkbox"
-            />
-          </div>
-
-          <div v-if="tab.selectedPlatform === 2 && !isImageTextTab(tab)" class="draft-section">
-            <el-checkbox
-              v-model="tab.isDraft"
-              label="视频号仅保存草稿(用手机发布)"
-              class="draft-checkbox"
             />
           </div>
 
@@ -204,37 +196,19 @@
             />
           </div>
 
-          <BilibiliPublishFields
-            v-if="tab.selectedPlatform === 5 && !isImageTextTab(tab)"
-            v-model:description="tab.description"
-            v-model:bilibili-tid="tab.bilibiliTid"
+          <PlatformEnhancementHost :tab="tab" />
+
+          <BaseVideoFields
+            v-if="!isImageTextTab(tab)"
+            v-model:title="tab.title"
           />
 
-          <div class="title-section">
-            <h3>标题</h3>
-            <el-input
-              v-model="tab.title"
-              type="textarea"
-              :rows="3"
-              placeholder="请输入标题"
-              maxlength="100"
-              show-word-limit
-              class="title-input"
-            />
-          </div>
-
-          <div v-if="isImageTextTab(tab)" class="note-section">
-            <h3>图文正文</h3>
-            <el-input
-              v-model="tab.noteContent"
-              type="textarea"
-              :rows="6"
-              :placeholder="getNotePlaceholder(getPlatformName(tab.selectedPlatform))"
-              maxlength="1000"
-              show-word-limit
-              class="title-input"
-            />
-          </div>
+          <BaseImageTextFields
+            v-else
+            v-model:title="tab.title"
+            v-model:note-content="tab.noteContent"
+            :note-placeholder="getNotePlaceholder(getPlatformName(tab.selectedPlatform))"
+          />
 
           <div class="topic-section">
             <h3>话题</h3>
@@ -382,8 +356,10 @@ import { useRouter } from 'vue-router'
 import { Upload } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { accountApi } from '@/api/account'
+import BaseImageTextFields from '@/components/publish/BaseImageTextFields.vue'
+import BaseVideoFields from '@/components/publish/BaseVideoFields.vue'
+import PlatformEnhancementHost from '@/components/publish/PlatformEnhancementHost.vue'
 import PublishBatchProgressDialog from '@/components/PublishBatchProgressDialog.vue'
-import BilibiliPublishFields from '@/components/BilibiliPublishFields.vue'
 import MaterialPreviewDialog from '@/components/MaterialPreviewDialog.vue'
 import PublishMaterialSelectorDialog from '@/components/PublishMaterialSelectorDialog.vue'
 import PublishTabBar from '@/components/PublishTabBar.vue'
@@ -394,7 +370,6 @@ import { useAppStore } from '@/stores/app'
 import {
   buildPublishTabLabel,
   PUBLISH_PLATFORM_OPTIONS,
-  buildPublishPayload,
   getAvailableAccountsForPlatform,
   getDefaultSelectedAccountIdsForPlatform,
   getMismatchedAccountNamesForPlatform,
@@ -419,6 +394,7 @@ import {
   getUploadSectionTitle,
   getUploadTipText
 } from '@/constants/publishMaterials'
+import { buildPublishPayloadFromState } from '@/constants/publishPayload.js'
 import { restorePublishDraftWorkspace } from '@/constants/publishDrafts'
 import {
   createCopiedPublishTab,
@@ -832,7 +808,7 @@ const confirmPublish = async (tab) => {
     throw new Error('请选择B站分区')
   }
 
-  const publishData = buildPublishPayload(tab, accountStore.accounts)
+  const publishData = buildPublishPayloadFromState(tab, accountStore.accounts)
 
   try {
     const data = await http.post('/postVideo', publishData)

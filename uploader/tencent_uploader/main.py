@@ -13,6 +13,13 @@ from patchright.async_api import async_playwright
 
 from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from uploader.tencent_uploader.note_workflow import (
+    apply_tencent_named_collection,
+    fill_tencent_note_body,
+    fill_tencent_note_title_and_tags,
+    switch_to_tencent_note_mode,
+    upload_tencent_note_images,
+)
 from utils.base_social_media import set_init_script
 from utils.log import tencent_logger
 
@@ -1117,6 +1124,10 @@ class TencentNote(TencentBaseUploader):
         self.title = title or (self.note[:30] if self.note else "")
         self.tags = tags or []
         self.is_draft = is_draft
+        self.collection_name = ""
+        self.declare_original = False
+        self.original_type = ""
+        self.content_declaration = ""
 
     async def validate_upload_args(self):
         await self.validate_base_args()
@@ -1134,22 +1145,27 @@ class TencentNote(TencentBaseUploader):
         self.image_paths = normalized_image_paths
 
     async def switch_to_note_mode(self, page: Page) -> None:
-        raise NotImplementedError("请在 TencentNote.switch_to_note_mode 中补充视频号切换到图文发布模式的逻辑")
+        await switch_to_tencent_note_mode(page)
 
     async def upload_note_images(self, page: Page) -> None:
-        raise NotImplementedError("请在 TencentNote.upload_note_images 中补充视频号图文图片上传逻辑")
+        await upload_tencent_note_images(page, self.image_paths)
 
     async def fill_note_title_and_tags(self, page: Page) -> None:
-        raise NotImplementedError("请在 TencentNote.fill_note_title_and_tags 中补充视频号图文标题/话题填写逻辑")
+        await fill_tencent_note_title_and_tags(page, self.title, self.tags)
 
     async def fill_note_body(self, page: Page) -> None:
-        return None
+        await fill_tencent_note_body(page, self.note)
 
     async def prepare_note_for_publish(self, page: Page) -> None:
         await self.fill_note_title_and_tags(page)
         await self.fill_note_body(page)
-        await self.apply_collection(page)
-        await self.apply_original_statement(page)
+        if self.collection_name:
+            await apply_tencent_named_collection(page, self.collection_name)
+        else:
+            await self.apply_collection(page)
+        if self.declare_original:
+            self.category = self.original_type
+            await self.apply_original_statement(page)
 
     async def upload_note_content(self, page: Page) -> None:
         await self.switch_to_note_mode(page)

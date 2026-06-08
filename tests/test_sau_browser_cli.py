@@ -105,6 +105,41 @@ class BrowserCliParserTests(unittest.TestCase):
         self.assertEqual(args.thumbnail_landscape, landscape_path)
         self.assertEqual(args.thumbnail_portrait, portrait_path)
 
+    def test_tencent_upload_note_accepts_platform_enhancement_flags(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = Path(tmp_dir) / "1.png"
+            image_path.write_bytes(b"image")
+
+            parser = sau_cli.build_parser()
+            args = parser.parse_args(
+                [
+                    "tencent",
+                    "upload-note",
+                    "--account",
+                    "creator",
+                    "--images",
+                    str(image_path),
+                    "--title",
+                    "图文标题",
+                    "--note",
+                    "图文正文",
+                    "--collection-name",
+                    "旅行合集",
+                    "--declare-original",
+                    "--original-type",
+                    "生活",
+                    "--content-declaration",
+                    "无需声明",
+                    "--draft",
+                ]
+            )
+
+        self.assertEqual(args.collection_name, "旅行合集")
+        self.assertTrue(args.declare_original)
+        self.assertEqual(args.original_type, "生活")
+        self.assertEqual(args.content_declaration, "无需声明")
+        self.assertTrue(args.draft)
+
     def test_kuaishou_upload_note_accepts_title_and_note(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             image_path = Path(tmp_dir) / "1.png"
@@ -319,6 +354,36 @@ class BrowserCliDispatchTests(unittest.TestCase):
         request = mock_upload.await_args.args[0]
         self.assertEqual(request.thumbnail_landscape_file, Path("landscape.png"))
         self.assertEqual(request.thumbnail_portrait_file, Path("portrait.png"))
+
+    def test_dispatch_tencent_upload_note_uses_platform_enhancement_request_fields(self):
+        args = Namespace(
+            platform="tencent",
+            action="upload-note",
+            account="creator",
+            images=[Path("1.png"), Path("2.png")],
+            title="图文标题",
+            note="图文正文",
+            tags="测试,图文",
+            schedule=0,
+            collection_name="旅行合集",
+            declare_original=True,
+            original_type="生活",
+            content_declaration="无需声明",
+            draft=True,
+            debug=False,
+            headless=True,
+        )
+        with patch("sau_cli.upload_tencent_note", new=AsyncMock()) as mock_upload:
+            asyncio.run(sau_cli.dispatch(args))
+
+        request = mock_upload.await_args.args[0]
+        self.assertEqual(request.title, "图文标题")
+        self.assertEqual(request.note, "图文正文")
+        self.assertEqual(request.collection_name, "旅行合集")
+        self.assertTrue(request.declare_original)
+        self.assertEqual(request.original_type, "生活")
+        self.assertEqual(request.content_declaration, "无需声明")
+        self.assertTrue(request.is_draft)
 
     def test_dispatch_xiaohongshu_upload_video_uses_headed_request(self):
         args = Namespace(
