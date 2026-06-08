@@ -114,59 +114,31 @@
 
           <div class="account-section">
             <h3>账号</h3>
-            <div class="account-display">
-              <div class="selected-accounts">
-                <el-tag
-                  v-for="(account, index) in tab.selectedAccounts"
-                  :key="index"
-                  closable
-                  @close="removeAccount(tab, index)"
-                  class="account-tag"
-                >
-                  {{ getAccountDisplayName(account) }}
-                </el-tag>
-              </div>
-              <el-button 
-                type="primary" 
-                plain 
-                @click="openAccountDialog(tab)"
-                class="select-account-btn"
+            <div class="account-select-wrapper">
+              <el-select
+                :model-value="tab.selectedAccounts[0]"
+                placeholder="请选择账号"
+                class="account-select"
+                @change="handleAccountChange(tab, $event)"
               >
-                选择账号
-              </el-button>
+                <el-option
+                  v-for="account in getAvailableAccountsForTab(tab)"
+                  :key="account.id"
+                  :label="account.name"
+                  :value="account.id"
+                />
+                <template #empty>
+                  <div class="account-empty-state">
+                    <span>当前平台暂无账号，请先去添加</span>
+                    <el-button type="primary" link @click="goToAccountManagement">去添加</el-button>
+                  </div>
+                </template>
+              </el-select>
+              <p v-if="getAvailableAccountsForTab(tab).length === 0" class="account-empty-tip">
+                当前平台暂无账号，请先去添加
+              </p>
             </div>
           </div>
-
-          <el-dialog
-            v-model="accountDialogVisible"
-            title="选择账号"
-            width="600px"
-            class="account-dialog"
-          >
-            <div class="account-dialog-content">
-              <el-checkbox-group v-model="tempSelectedAccounts">
-                <div class="account-list">
-                  <el-checkbox
-                    v-for="account in availableAccounts"
-                    :key="account.id"
-                    :label="account.id"
-                    class="account-item"
-                  >
-                    <div class="account-info">
-                      <span class="account-name">{{ account.name }}</span>                      
-                    </div>
-                  </el-checkbox>
-                </div>
-              </el-checkbox-group>
-            </div>
-
-            <template #footer>
-              <div class="dialog-footer">
-                <el-button @click="accountDialogVisible = false">取消</el-button>
-                <el-button type="primary" @click="confirmAccountSelection">确定</el-button>
-              </div>
-            </template>
-          </el-dialog>
 
           <div class="platform-section">
             <h3>平台</h3>
@@ -406,6 +378,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { Upload } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { accountApi } from '@/api/account'
@@ -422,8 +395,8 @@ import {
   buildPublishTabLabel,
   PUBLISH_PLATFORM_OPTIONS,
   buildPublishPayload,
-  filterAccountIdsForPlatform,
   getAvailableAccountsForPlatform,
+  getDefaultSelectedAccountIdsForPlatform,
   getMismatchedAccountNamesForPlatform,
   getPublishPlatformOption,
   getSupportedContentTypesForPlatform,
@@ -466,6 +439,7 @@ const activeTab = ref('tab1')
 let tabCounter = 1
 
 const appStore = useAppStore()
+const router = useRouter()
 
 const localUploadVisible = ref(false)
 const materialLibraryVisible = ref(false)
@@ -519,8 +493,6 @@ const tabs = reactive([
   createEmptyPublishTab()
 ])
 
-const accountDialogVisible = ref(false)
-const tempSelectedAccounts = ref([])
 const currentTab = ref(null)
 
 const accountStore = useAccountStore()
@@ -543,18 +515,43 @@ const syncAllTabLabels = () => {
   tabs.forEach((tab) => syncTabLabel(tab))
 }
 
-const availableAccounts = computed(() => {
-  return currentTab.value
-    ? getAvailableAccountsForPlatform(accountStore.accounts, currentTab.value.selectedPlatform)
-    : []
-})
+/**
+ * 下拉账号列表按当前 Tab 的平台实时过滤，避免切平台后看到脏选项。
+ */
+const getAvailableAccountsForTab = (tab) => (
+  getAvailableAccountsForPlatform(accountStore.accounts, tab.selectedPlatform)
+)
+
+/**
+ * 账号选择改为下拉单选后，统一保证每个 Tab 至少优先选中当前平台的第一个账号。
+ */
+const syncTabSelectedAccount = (tab) => {
+  if (accountStore.accounts.length === 0) {
+    syncTabLabel(tab)
+    return
+  }
+
+  tab.selectedAccounts = getDefaultSelectedAccountIdsForPlatform(
+    accountStore.accounts,
+    tab.selectedAccounts,
+    tab.selectedPlatform
+  )
+  syncTabLabel(tab)
+}
+
+/**
+ * 账号列表就绪后，批量补齐全部 Tab 的默认账号和对应标题。
+ */
+const syncAllTabsAccountSelection = () => {
+  tabs.forEach((tab) => syncTabSelectedAccount(tab))
+}
 
 /**
  * 发布中心会被用户直接打开，因此这里兜底拉一次账号列表，避免依赖别的页面提前填充 store。
  */
 const loadPublishCenterAccounts = async () => {
   if (accountStore.accounts.length > 0) {
-    syncAllTabLabels()
+    syncAllTabsAccountSelection()
     return
   }
 
@@ -562,7 +559,7 @@ const loadPublishCenterAccounts = async () => {
     const response = await accountApi.getAccounts()
     if (response.code === 200) {
       accountStore.setAccounts(response.data)
-      syncAllTabLabels()
+      syncAllTabsAccountSelection()
     }
   } catch (error) {
     console.error('获取发布中心账号列表失败:', error)
@@ -584,16 +581,18 @@ const recommendedTopics = [
 const applyDraftWorkspace = (workspace) => {
   const restoredWorkspace = restorePublishDraftWorkspace(workspace)
   tabs.splice(0, tabs.length, ...restoredWorkspace.tabs)
-  syncAllTabLabels()
+  if (accountStore.accounts.length > 0) {
+    syncAllTabsAccountSelection()
+  } else {
+    syncAllTabLabels()
+  }
   activeTab.value = restoredWorkspace.activeTab
   tabCounter = restoredWorkspace.tabCounter
   currentTab.value = null
   currentUploadTab.value = null
-  tempSelectedAccounts.value = []
   selectedMaterials.value = []
   localUploadVisible.value = false
   materialLibraryVisible.value = false
-  accountDialogVisible.value = false
   topicDialogVisible.value = false
 }
 
@@ -638,6 +637,7 @@ const addTab = (platformKey) => {
 
     tabCounter += copiedTabs.length
     tabs.push(...copiedTabs)
+    copiedTabs.forEach((tab) => syncTabSelectedAccount(tab))
     activeTab.value = copiedTabs[copiedTabs.length - 1].name
     ElMessage.success(`已复制到${copiedTabs.length}个平台`)
     return
@@ -646,6 +646,7 @@ const addTab = (platformKey) => {
   tabCounter++
   const newTab = createCopiedPublishTab(sourceTab, platformKey, tabCounter)
   tabs.push(newTab)
+  syncTabSelectedAccount(newTab)
   activeTab.value = newTab.name
   ElMessage.success(`已复制到新的${getPlatformName(newTab.selectedPlatform)}标签`)
 }
@@ -730,38 +731,20 @@ const confirmTopicSelection = () => {
   ElMessage.success('添加话题完成')
 }
 
-const openAccountDialog = (tab) => {
-  currentTab.value = tab
-  tempSelectedAccounts.value = [...tab.selectedAccounts]
-  accountDialogVisible.value = true
+/**
+ * 账号选择改为下拉单选后，值变更时只保留一个账号，并在空值场景回退到平台默认账号。
+ */
+const handleAccountChange = (tab, accountId) => {
+  tab.selectedAccounts = accountId ? [accountId] : []
+  syncTabSelectedAccount(tab)
 }
 
-const confirmAccountSelection = () => {
-  if (currentTab.value) {
-    currentTab.value.selectedAccounts = [...tempSelectedAccounts.value]
-    syncTabLabel(currentTab.value)
-  }
-  accountDialogVisible.value = false
-  currentTab.value = null
-  ElMessage.success('账号选择完成')
-}
-
-const removeAccount = (tab, index) => {
-  tab.selectedAccounts.splice(index, 1)
-  syncTabLabel(tab)
-}
-
-const getAccountDisplayName = (accountId) => {
-  const account = accountStore.accounts.find(acc => acc.id === accountId)
-  return account ? account.name : accountId
+const goToAccountManagement = () => {
+  router.push('/account-management')
 }
 
 const handlePlatformChange = (tab) => {
-  tab.selectedAccounts = filterAccountIdsForPlatform(
-    accountStore.accounts,
-    tab.selectedAccounts,
-    tab.selectedPlatform
-  )
+  syncTabSelectedAccount(tab)
   tab.contentType = resolveSupportedContentType(tab.selectedPlatform, tab.contentType)
   const filteredFiles = filterFilesByContentType(tab.fileList, tab.contentType)
   if (filteredFiles.length !== tab.fileList.length) {
@@ -769,7 +752,9 @@ const handlePlatformChange = (tab) => {
   }
   tab.fileList = filteredFiles
   tab.displayFileList = buildDisplayFileList(tab.fileList)
-  syncTabLabel(tab)
+  if (tab.selectedAccounts.length === 0) {
+    ElMessage.warning('当前平台暂无账号，请先去账号管理添加')
+  }
 }
 
 /**
@@ -864,7 +849,7 @@ const confirmPublish = async (tab) => {
     tab.selectedTopics = []
     tab.selectedAccounts = []
     tab.scheduleEnabled = false
-    syncTabLabel(tab)
+    syncTabSelectedAccount(tab)
   } catch (error) {
     console.error('发布错误:', error)
     tab.publishStatus = {
@@ -1094,8 +1079,29 @@ onMounted(() => {
           }
         }
         
-        .account-input {
-          max-width: 400px;
+        .account-select-wrapper {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          max-width: 420px;
+
+          .account-select {
+            width: 100%;
+          }
+
+          .account-empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            color: $text-secondary;
+          }
+
+          .account-empty-tip {
+            margin: 0;
+            font-size: 13px;
+            color: $text-secondary;
+          }
         }
         
         .platform-buttons {

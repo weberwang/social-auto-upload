@@ -163,6 +163,25 @@ export function getAvailableAccountsForPlatform(accounts, platformKey) {
 }
 
 /**
+ * 账号选择改为下拉单选后，统一收敛为“保留首个合法账号，否则默认当前平台第一个账号”。
+ */
+export function getDefaultSelectedAccountIdsForPlatform(accounts, selectedAccountIds, platformKey) {
+  const availableAccounts = getAvailableAccountsForPlatform(accounts, platformKey)
+  const availableAccountIds = new Set(availableAccounts.map((account) => account.id))
+  const firstMatchedAccountId = selectedAccountIds.find((accountId) => availableAccountIds.has(accountId))
+
+  if (firstMatchedAccountId) {
+    return [firstMatchedAccountId]
+  }
+
+  if (availableAccounts.length > 0) {
+    return [availableAccounts[0].id]
+  }
+
+  return []
+}
+
+/**
  * 过滤掉不属于当前平台的已选账号，避免用户先选账号再切平台后残留脏数据。
  */
 export function filterAccountIdsForPlatform(accounts, selectedAccountIds, platformKey) {
