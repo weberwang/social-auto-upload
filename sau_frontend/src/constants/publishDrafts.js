@@ -1,4 +1,5 @@
 import {
+  buildPublishTabLabel,
   createDefaultPublishTab,
   resolveSupportedContentType
 } from '@/constants/publishPlatforms'
@@ -63,7 +64,7 @@ export function restorePublishTab(rawTab, index) {
     ...defaultTab,
     ...safeTab,
     name: safeTab.name || `tab${index + 1}`,
-    label: safeTab.label || `发布${index + 1}`,
+    label: safeTab.label || defaultTab.label,
     publishStatus: null,
     publishing: false,
     selectedPlatform: Number(safeTab.selectedPlatform) || defaultTab.selectedPlatform
@@ -84,6 +85,10 @@ export function restorePublishTab(rawTab, index) {
   restoredTab.dailyTimes = Array.isArray(restoredTab.dailyTimes) && restoredTab.dailyTimes.length > 0
     ? restoredTab.dailyTimes
     : ['10:00']
+  restoredTab.label = buildPublishTabLabel(
+    restoredTab.selectedPlatform,
+    restoredTab.selectedAccounts,
+  )
 
   if (restoredTab.contentType !== PUBLISH_CONTENT_TYPE_IMAGE_TEXT) {
     restoredTab.noteContent = ''

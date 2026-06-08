@@ -1,58 +1,25 @@
 <template>
   <div class="publish-center">
-    <div class="tab-management">
-      <div class="tab-header">
-        <div class="tab-list">
-          <div 
-            v-for="tab in tabs" 
-            :key="tab.name"
-            :class="['tab-item', { active: activeTab === tab.name }]"
-            @click="activeTab = tab.name"
-          >
-            <span>{{ tab.label }}</span>
-            <el-icon 
-              v-if="tabs.length > 1"
-              class="close-icon" 
-              @click.stop="removeTab(tab.name)"
-            >
-              <Close />
-            </el-icon>
-          </div>
-        </div>
-        <div class="tab-actions">
-          <PublishDraftActions
-            :visible="draftDialogVisible"
-            :loading="draftLoading"
-            :drafts="draftItems"
-            :current-draft-name="currentDraftName"
-            @save="saveDraft"
-            @open="openDraftDialog"
-            @refresh="refreshDrafts"
-            @load="loadDraft"
-            @delete="removeDraft"
-            @update:visible="draftDialogVisible = $event"
-          />
-          <el-button 
-            type="primary" 
-            size="small" 
-            @click="addTab"
-            class="add-tab-btn"
-          >
-            <el-icon><Plus /></el-icon>
-            添加Tab
-          </el-button>
-          <el-button 
-            type="success" 
-            size="small" 
-            @click="batchPublish"
-            :loading="batchPublishing"
-            class="batch-publish-btn"
-          >
-            批量发布
-          </el-button>
-        </div>
-      </div>
-    </div>
+    <PublishTabBar
+      :tabs="tabs"
+      :active-tab="activeTab"
+      :platforms="platforms"
+      :batch-publishing="batchPublishing"
+      :draft-dialog-visible="draftDialogVisible"
+      :draft-loading="draftLoading"
+      :draft-items="draftItems"
+      :current-draft-name="currentDraftName"
+      @select-tab="activeTab = $event"
+      @remove-tab="removeTab"
+      @copy-tab="addTab"
+      @batch-publish="batchPublish"
+      @save-draft="saveDraft"
+      @open-draft="openDraftDialog"
+      @refresh-drafts="refreshDrafts"
+      @load-draft="loadDraft"
+      @remove-draft="removeDraft"
+      @update:draft-visible="draftDialogVisible = $event"
+    />
 
     <div class="publish-content">
       <div class="tab-content-wrapper">
@@ -439,22 +406,22 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Upload, Plus, Close } from '@element-plus/icons-vue'
+import { Upload } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { accountApi } from '@/api/account'
 import PublishBatchProgressDialog from '@/components/PublishBatchProgressDialog.vue'
 import BilibiliPublishFields from '@/components/BilibiliPublishFields.vue'
 import MaterialPreviewDialog from '@/components/MaterialPreviewDialog.vue'
 import PublishMaterialSelectorDialog from '@/components/PublishMaterialSelectorDialog.vue'
-import PublishDraftActions from '@/components/PublishDraftActions.vue'
+import PublishTabBar from '@/components/PublishTabBar.vue'
 import { useMaterialPreviewDialog } from '@/composables/useMaterialPreviewDialog.js'
 import { usePublishDrafts } from '@/composables/usePublishDrafts.js'
 import { useAccountStore } from '@/stores/account'
 import { useAppStore } from '@/stores/app'
 import {
+  buildPublishTabLabel,
   PUBLISH_PLATFORM_OPTIONS,
   buildPublishPayload,
-  createDefaultPublishTab,
   filterAccountIdsForPlatform,
   getAvailableAccountsForPlatform,
   getMismatchedAccountNamesForPlatform,
@@ -480,6 +447,11 @@ import {
   getUploadTipText
 } from '@/constants/publishMaterials'
 import { restorePublishDraftWorkspace } from '@/constants/publishDrafts'
+import {
+  createCopiedPublishTab,
+  createCopiedPublishTabsForPlatforms,
+  createEmptyPublishTab
+} from '@/constants/publishTabCopy.js'
 import { materialApi } from '@/api/material'
 import { http } from '@/utils/request'
 
@@ -543,17 +515,8 @@ const getContentTypeOptions = (tab) => {
  */
 const isImageTextTab = (tab) => tab.contentType === PUBLISH_CONTENT_TYPE_IMAGE_TEXT
 
-const makeNewTab = () => {
-  try {
-    const defaultTab = createDefaultPublishTab()
-    return typeof structuredClone === 'function' ? structuredClone(defaultTab) : JSON.parse(JSON.stringify(defaultTab))
-  } catch (e) {
-    return JSON.parse(JSON.stringify(createDefaultPublishTab()))
-  }
-}
-
 const tabs = reactive([
-  makeNewTab()
+  createEmptyPublishTab()
 ])
 
 const accountDialogVisible = ref(false)
@@ -561,6 +524,24 @@ const tempSelectedAccounts = ref([])
 const currentTab = ref(null)
 
 const accountStore = useAccountStore()
+
+/**
+ * 页签标题统一跟随“账号 + 平台”规则变化，避免不同交互入口各自维护一套标题逻辑。
+ */
+const syncTabLabel = (tab) => {
+  tab.label = buildPublishTabLabel(
+    tab.selectedPlatform,
+    tab.selectedAccounts,
+    accountStore.accounts
+  )
+}
+
+/**
+ * 账号列表刷新或草稿整体回填后，需要批量重算所有页签标题。
+ */
+const syncAllTabLabels = () => {
+  tabs.forEach((tab) => syncTabLabel(tab))
+}
 
 const availableAccounts = computed(() => {
   return currentTab.value
@@ -573,6 +554,7 @@ const availableAccounts = computed(() => {
  */
 const loadPublishCenterAccounts = async () => {
   if (accountStore.accounts.length > 0) {
+    syncAllTabLabels()
     return
   }
 
@@ -580,6 +562,7 @@ const loadPublishCenterAccounts = async () => {
     const response = await accountApi.getAccounts()
     if (response.code === 200) {
       accountStore.setAccounts(response.data)
+      syncAllTabLabels()
     }
   } catch (error) {
     console.error('获取发布中心账号列表失败:', error)
@@ -601,6 +584,7 @@ const recommendedTopics = [
 const applyDraftWorkspace = (workspace) => {
   const restoredWorkspace = restorePublishDraftWorkspace(workspace)
   tabs.splice(0, tabs.length, ...restoredWorkspace.tabs)
+  syncAllTabLabels()
   activeTab.value = restoredWorkspace.activeTab
   tabCounter = restoredWorkspace.tabCounter
   currentTab.value = null
@@ -630,13 +614,40 @@ const {
   applyWorkspace: applyDraftWorkspace
 })
 
-const addTab = () => {
+/**
+ * 复制当前激活标签到目标平台，新标签只保留跨平台可复用的内容字段。
+ */
+const addTab = (platformKey) => {
+  const sourceTab = tabs.find((tab) => tab.name === activeTab.value)
+  if (!sourceTab) {
+    ElMessage.warning('请先选择要复制的标签')
+    return
+  }
+
+  if (platformKey === 'copy_all') {
+    const copiedTabs = createCopiedPublishTabsForPlatforms(
+      sourceTab,
+      platforms.map((platform) => platform.key),
+      tabCounter + 1
+    )
+
+    if (copiedTabs.length === 0) {
+      ElMessage.warning('当前没有可复制的其他平台')
+      return
+    }
+
+    tabCounter += copiedTabs.length
+    tabs.push(...copiedTabs)
+    activeTab.value = copiedTabs[copiedTabs.length - 1].name
+    ElMessage.success(`已复制到${copiedTabs.length}个平台`)
+    return
+  }
+
   tabCounter++
-  const newTab = makeNewTab()
-  newTab.name = `tab${tabCounter}`
-  newTab.label = `发布${tabCounter}`
+  const newTab = createCopiedPublishTab(sourceTab, platformKey, tabCounter)
   tabs.push(newTab)
   activeTab.value = newTab.name
+  ElMessage.success(`已复制到新的${getPlatformName(newTab.selectedPlatform)}标签`)
 }
 
 const removeTab = (tabName) => {
@@ -728,6 +739,7 @@ const openAccountDialog = (tab) => {
 const confirmAccountSelection = () => {
   if (currentTab.value) {
     currentTab.value.selectedAccounts = [...tempSelectedAccounts.value]
+    syncTabLabel(currentTab.value)
   }
   accountDialogVisible.value = false
   currentTab.value = null
@@ -736,6 +748,7 @@ const confirmAccountSelection = () => {
 
 const removeAccount = (tab, index) => {
   tab.selectedAccounts.splice(index, 1)
+  syncTabLabel(tab)
 }
 
 const getAccountDisplayName = (accountId) => {
@@ -756,6 +769,7 @@ const handlePlatformChange = (tab) => {
   }
   tab.fileList = filteredFiles
   tab.displayFileList = buildDisplayFileList(tab.fileList)
+  syncTabLabel(tab)
 }
 
 /**
@@ -850,6 +864,7 @@ const confirmPublish = async (tab) => {
     tab.selectedTopics = []
     tab.selectedAccounts = []
     tab.scheduleEnabled = false
+    syncTabLabel(tab)
   } catch (error) {
     console.error('发布错误:', error)
     tab.publishStatus = {
@@ -1025,91 +1040,6 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  
-  // Tab管理区域
-  .tab-management {
-    background-color: #fff;
-    border-radius: 4px;
-    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
-    margin-bottom: 20px;
-    padding: 15px 20px;
-    
-    .tab-header {
-      display: flex;
-      align-items: flex-start;
-      gap: 15px;
-      
-      .tab-list {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        flex: 1;
-        min-width: 0;
-        
-        .tab-item {
-           display: flex;
-           align-items: center;
-           gap: 6px;
-           padding: 6px 12px;
-           background-color: #f5f7fa;
-           border: 1px solid #dcdfe6;
-           border-radius: 4px;
-           cursor: pointer;
-           transition: all 0.3s;
-           font-size: 14px;
-           height: 32px;
-           
-           &:hover {
-             background-color: #ecf5ff;
-             border-color: #b3d8ff;
-           }
-           
-           &.active {
-             background-color: #409eff;
-             border-color: #409eff;
-             color: #fff;
-             
-             .close-icon {
-               color: #fff;
-               
-               &:hover {
-                 background-color: rgba(255, 255, 255, 0.2);
-               }
-             }
-           }
-           
-           .close-icon {
-             padding: 2px;
-             border-radius: 2px;
-             cursor: pointer;
-             transition: background-color 0.3s;
-             font-size: 12px;
-             
-             &:hover {
-               background-color: rgba(0, 0, 0, 0.1);
-             }
-           }
-         }
-       }
-       
-      .tab-actions {
-        display: flex;
-        gap: 10px;
-        flex-shrink: 0;
-        
-        .add-tab-btn,
-        .batch-publish-btn {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          height: 32px;
-          padding: 6px 12px;
-          font-size: 14px;
-          white-space: nowrap;
-        }
-      }
-    }
-  }
   
   .dialog-footer {
     text-align: right;

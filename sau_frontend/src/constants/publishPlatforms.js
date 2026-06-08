@@ -65,13 +65,41 @@ export const PUBLISH_ACCOUNT_PLATFORM_BY_KEY = {
 }
 
 /**
+ * 把已选账号 ID 转成页签标题需要的展示名称，账号列表未就绪时回退到原始 ID。
+ */
+export function resolvePublishTabAccountNames(selectedAccountIds, accounts) {
+  return selectedAccountIds.map((accountId) => {
+    const matchedAccount = accounts.find((account) => String(account.id) === String(accountId))
+    return matchedAccount?.name || String(accountId)
+  })
+}
+
+/**
+ * 统一生成发布页签标题，格式固定为“账号 + 平台”，多账号时收敛成首个账号加数量。
+ */
+export function buildPublishTabLabel(platformKey, selectedAccountIds = [], accounts = []) {
+  const platformName = getPublishPlatformOption(platformKey)?.name || '未选平台'
+  const accountNames = resolvePublishTabAccountNames(selectedAccountIds, accounts)
+
+  if (accountNames.length === 0) {
+    return `未选账号·${platformName}`
+  }
+
+  if (accountNames.length === 1) {
+    return `${accountNames[0]}·${platformName}`
+  }
+
+  return `${accountNames[0]}等${accountNames.length}个·${platformName}`
+}
+
+/**
  * 创建发布 Tab 的初始状态。
  * B 站的简介和分区单独作为平台专属字段，避免污染其他平台逻辑。
  */
 export function createDefaultPublishTab() {
   return {
     name: 'tab1',
-    label: '发布1',
+    label: buildPublishTabLabel(1, []),
     fileList: [],
     displayFileList: [],
     selectedAccounts: [],
