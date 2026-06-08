@@ -1,4 +1,4 @@
-﻿param(
+param(
     [Parameter(Mandatory = $true)]
     [string]$FrontendDir,
 
@@ -9,7 +9,40 @@
     [int]$BackendPort
 )
 
-# 前端放到独立窗口里等待后端端口，避免批处理里嵌套 cmd 引号和 &&/|| 导致解析失真。
+$projectFrontendDir = [System.IO.Path]::GetFullPath($FrontendDir)
+
+# Stop stale Vite processes from this repo so the next launch stays on 5173.
+function Stop-StaleFrontendProcesses {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FrontendDir
+    )
+
+    $escapedFrontendDir = [Regex]::Escape($FrontendDir)
+    $viteProcesses = Get-CimInstance Win32_Process |
+        Where-Object {
+            $_.Name -eq 'node.exe' -and
+            $_.CommandLine -and
+            $_.CommandLine -match $escapedFrontendDir -and
+            $_.CommandLine -match 'vite'
+        } |
+        Sort-Object ProcessId -Unique
+
+    if (-not $viteProcesses) {
+        Write-Output '[INFO] No stale frontend Vite process found.'
+        return
+    }
+
+    foreach ($viteProcess in $viteProcesses) {
+        Write-Output "[INFO] Stopping stale frontend Vite process PID=$($viteProcess.ProcessId)"
+        Stop-Process -Id $viteProcess.ProcessId -Force
+    }
+
+    Start-Sleep -Milliseconds 500
+}
+
+# Wait for the backend first, then start the frontend in the current window.
 $waitProcess = Start-Process -FilePath "powershell.exe" -ArgumentList @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
@@ -22,6 +55,8 @@ if ($waitProcess.ExitCode -ne 0) {
     Write-Warning "Backend was not confirmed within 30 seconds. Frontend will still start."
 }
 
-# 这里切到前端目录后直接接管窗口，便于持续查看 Vite 输出和后续手动操作。
-Set-Location -Path $FrontendDir
-npm run dev -- --host 0.0.0.0
+Stop-StaleFrontendProcesses -FrontendDir $projectFrontendDir
+
+# Use the default Vite dev command so the project root is detected correctly.
+Set-Location -Path $projectFrontendDir
+npm run dev

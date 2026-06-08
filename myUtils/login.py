@@ -13,6 +13,7 @@ from playwright.async_api import async_playwright
 from myUtils.auth import check_cookie
 from myUtils.bilibili_web_bridge import build_biliup_account_payload
 from uploader.douyin_uploader.main import douyin_cookie_gen as mainline_douyin_cookie_gen
+from uploader.tencent_uploader.main import get_tencent_cookie as mainline_tencent_cookie_gen
 from utils.base_social_media import set_init_script
 from utils.log import bilibili_logger
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
@@ -40,6 +41,28 @@ async def _push_douyin_qrcode_to_status_queue(qrcode_info, status_queue):
     if image_data_url:
         print("✅ 图片地址:", image_data_url)
         status_queue.put(image_data_url)
+
+
+async def _push_tencent_qrcode_to_status_queue(qrcode_info, status_queue):
+    """把主线视频号登录流程产出的二维码透传给历史 Web SSE 队列。"""
+
+    image_data_url = qrcode_info.get("image_data_url") if qrcode_info else ""
+    if image_data_url:
+        print("视频号二维码地址:", image_data_url)
+        status_queue.put(image_data_url)
+
+
+async def _push_tencent_debug_to_status_queue(status_event, status_queue):
+    """把主线视频号登录调试事件透传给历史 Web SSE，便于前后端同时定位卡点。"""
+
+    if not isinstance(status_event, dict):
+        return
+
+    stage = str(status_event.get("stage") or "unknown")
+    detail = str(status_event.get("detail") or "")
+    debug_message = f"LOG:视频号:{stage}:{detail}"
+    print(f"视频号调试事件: {debug_message}")
+    status_queue.put(debug_message)
 
 
 def _build_qrcode_data_url(qrcode_content: str) -> str:
@@ -186,75 +209,70 @@ async def douyin_cookie_gen(id, status_queue):
 
 
 # 视频号登录
-async def get_tencent_cookie(id,status_queue):
-    url_changed_event = asyncio.Event()
-    async def on_url_change():
-        # 检查是否是主框架的变化
-        if page.url != original_url:
-            url_changed_event.set()
+async def get_tencent_cookie(id, status_queue, cancel_event=None, session_id: str = ""):
+    """历史 Web 视频号登录入口，复用主线扫码轮询逻辑，避免继续依赖 URL 跳转判定。"""
 
-    async with async_playwright() as playwright:
-        options = {
-            'args': [
-                '--lang en-GB'
-            ],
-            'headless': LOCAL_CHROME_HEADLESS,  # Set headless option here
-        }
-        # Make sure to run headed.
-        browser = await playwright.chromium.launch(**options)
-        # Setup context however you like.
-        context = await browser.new_context()  # Pass any options
-        # Pause the page, and start recording manually.
-        context = await set_init_script(context)
-        page = await context.new_page()
-        await page.goto("https://channels.weixin.qq.com")
-        original_url = page.url
+    uuid_v1 = uuid.uuid1()
+    print(f"UUID v1: {uuid_v1}")
 
-        # 监听页面的 'framenavigated' 事件，只关注主框架的变化
-        page.on('framenavigated',
-                lambda frame: asyncio.create_task(on_url_change()) if frame == page.main_frame else None)
+    # 历史 Web 仍然使用 cookiesFile 目录存储账号文件，这里显式传绝对路径给主线登录器。
+    cookies_dir = Path(BASE_DIR / "cookiesFile")
+    cookies_dir.mkdir(exist_ok=True)
+    account_file = cookies_dir / f"{uuid_v1}.json"
+    await _push_tencent_debug_to_status_queue(
+        {"stage": "legacy_login_start", "detail": f"历史Web视频号登录开始，账号={id}"},
+        status_queue,
+    )
+    await _push_tencent_debug_to_status_queue(
+        {"stage": "legacy_browser_mode", "detail": "历史Web视频号登录强制使用有头浏览器，规避无头风控"},
+        status_queue,
+    )
 
-        # 等待 iframe 出现（最多等 60 秒）
-        iframe_locator = page.frame_locator("iframe").first
+    result = await mainline_tencent_cookie_gen(
+        str(account_file),
+        qrcode_callback=lambda qrcode_info: _push_tencent_qrcode_to_status_queue(
+            qrcode_info, status_queue
+        ),
+        status_callback=lambda status_event: _push_tencent_debug_to_status_queue(
+            status_event, status_queue
+        ),
+        cancel_event=cancel_event,
+        # 视频号扫码登录强依赖接近真实浏览器环境；实测无头模式更容易被平台停留在 login.html。
+        headless=False,
+    )
 
-        # 获取 iframe 中的第一个 img 元素
-        img_locator = iframe_locator.get_by_role("img").first
+    if result.get("status") == "cancelled":
+        await _push_tencent_debug_to_status_queue(
+            {
+                "stage": "legacy_login_cancelled",
+                "detail": f"历史Web视频号登录已取消，session_id={session_id or 'unknown'}",
+            },
+            status_queue,
+        )
+        return None
 
-        # 获取 src 属性值
-        src = await img_locator.get_attribute("src")
-        print("✅ 图片地址:", src)
-        status_queue.put(src)
+    if not result.get("success"):
+        # 主线登录器已经覆盖了“已扫码待确认 / 页面未跳转 / cookie 校验失败”等新页面分支。
+        await _push_tencent_debug_to_status_queue(
+            {
+                "stage": "legacy_login_failed",
+                "detail": result.get("message", "视频号登录失败"),
+            },
+            status_queue,
+        )
+        _push_login_error(status_queue, result.get("message", "视频号登录失败"))
+        return None
 
-        try:
-            # 等待 URL 变化或超时
-            await asyncio.wait_for(url_changed_event.wait(), timeout=200)  # 最多等待 200 秒
-            print("监听页面跳转成功")
-        except asyncio.TimeoutError:
-            status_queue.put("500")
-            print("监听页面跳转超时")
-            await page.close()
-            await context.close()
-            await browser.close()
-            return None
-        uuid_v1 = uuid.uuid1()
-        print(f"UUID v1: {uuid_v1}")
-        # 确保cookiesFile目录存在
-        cookies_dir = Path(BASE_DIR / "cookiesFile")
-        cookies_dir.mkdir(exist_ok=True)
-        await context.storage_state(path=cookies_dir / f"{uuid_v1}.json")
-        result = await check_cookie(2,f"{uuid_v1}.json")
-        if not result:
-            status_queue.put("500")
-            await page.close()
-            await context.close()
-            await browser.close()
-            return None
-        await page.close()
-        await context.close()
-        await browser.close()
-
-        _save_user_info_record(2, f"{uuid_v1}.json", id)
-        status_queue.put("200")
+    await _push_tencent_debug_to_status_queue(
+        {
+            "stage": "legacy_login_success",
+            "detail": f"账号文件已落盘: {account_file.name}",
+        },
+        status_queue,
+    )
+    _save_user_info_record(2, account_file.name, id)
+    status_queue.put("200")
+    return account_file
 
 # 快手登录
 async def get_ks_cookie(id,status_queue):

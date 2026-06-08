@@ -21,6 +21,27 @@ TENCENT_UPLOAD_URL = "https://channels.weixin.qq.com/platform/post/create"
 TENCENT_MANAGE_URL = "https://channels.weixin.qq.com/platform/post/list"
 TENCENT_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 TENCENT_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
+TENCENT_PUBLISH_MARKER_SELECTORS = (
+    'div:has-text("发表视频")',
+    'button:has-text("发表")',
+    'button:has-text("保存草稿")',
+)
+TENCENT_LOGIN_MARKER_SELECTORS = (
+    "div.login-qrcode-wrap",
+    "div.qrcode-wrap",
+    "img.qrcode",
+    'span:has-text("微信扫码登录 视频号助手")',
+)
+TENCENT_QRCODE_EXPIRED_SELECTORS = (
+    'div.mask.show p.refresh-tip:has-text("二维码已过期，点击刷新")',
+    'div.mask.show p.refresh-tip:has-text("网络不可用，点击刷新")',
+    'p.refresh-tip:has-text("二维码已过期，点击刷新")',
+    'p.refresh-tip:has-text("网络不可用，点击刷新")',
+)
+TENCENT_QRCODE_SCANNED_SELECTORS = (
+    'div.qr-tip div:has-text("已扫码")',
+    'div.qr-tip div:has-text("需在手机上进行确认")',
+)
 
 
 def _msg(emoji: str, text: str) -> str:
@@ -45,6 +66,54 @@ async def _emit_qrcode_callback(qrcode_callback, payload: dict):
     callback_result = qrcode_callback(payload)
     if inspect.isawaitable(callback_result):
         await callback_result
+
+
+async def _emit_status_callback(status_callback, payload: dict):
+    """按需把登录阶段事件回调给上层，便于不同入口追加诊断日志。"""
+
+    if not status_callback:
+        return
+
+    callback_result = status_callback(payload)
+    if inspect.isawaitable(callback_result):
+        await callback_result
+
+
+async def _has_visible_selector(page: Page, selectors: tuple[str, ...]) -> bool:
+    """检查一组选择器里是否存在可见元素，用于统一页面状态探测逻辑。"""
+
+    for selector in selectors:
+        locator = page.locator(selector).first
+        try:
+            if await locator.count() and await locator.is_visible():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+async def _collect_tencent_login_state_snapshot(page: Page) -> dict[str, str | bool]:
+    """汇总当前视频号登录页关键状态，便于日志与轮询分支共享同一套判定。"""
+
+    return {
+        "url": page.url,
+        "publish_ready": await _has_visible_selector(page, TENCENT_PUBLISH_MARKER_SELECTORS),
+        "login_marker_visible": await _has_visible_selector(page, TENCENT_LOGIN_MARKER_SELECTORS),
+        "scan_tip_visible": await _has_visible_selector(page, TENCENT_QRCODE_SCANNED_SELECTORS),
+        "expired_tip_visible": await _has_visible_selector(page, TENCENT_QRCODE_EXPIRED_SELECTORS),
+    }
+
+
+def _format_tencent_login_state_snapshot(snapshot: dict[str, str | bool]) -> str:
+    """把页面状态快照格式化成单行日志，方便快速判断卡住位置。"""
+
+    return (
+        f"url={snapshot['url']}, "
+        f"publish_ready={snapshot['publish_ready']}, "
+        f"login_marker_visible={snapshot['login_marker_visible']}, "
+        f"scan_tip_visible={snapshot['scan_tip_visible']}, "
+        f"expired_tip_visible={snapshot['expired_tip_visible']}"
+    )
 
 
 def _build_login_result(
@@ -197,67 +266,25 @@ async def _save_tencent_qrcode(page: Page, account_file: str, previous_qrcode_pa
 
 
 async def _is_tencent_login_completed(page: Page) -> bool:
-    publish_markers = [
-        page.locator('div:has-text("发表视频")').first,
-        page.locator('button:has-text("发表")').first,
-        page.locator('button:has-text("保存草稿")').first,
-    ]
-    for marker in publish_markers:
-        try:
-            if await marker.count() and await marker.is_visible():
-                return True
-        except Exception:
-            continue
+    snapshot = await _collect_tencent_login_state_snapshot(page)
+    if snapshot["publish_ready"]:
+        return True
 
-    if not (page.url.startswith(TENCENT_UPLOAD_URL) or page.url.startswith(TENCENT_MANAGE_URL)):
+    if not (
+        str(snapshot["url"]).startswith(TENCENT_UPLOAD_URL)
+        or str(snapshot["url"]).startswith(TENCENT_MANAGE_URL)
+    ):
         return False
 
-    login_markers = [
-        page.locator("div.login-qrcode-wrap").first,
-        page.locator("div.qrcode-wrap").first,
-        page.locator("img.qrcode").first,
-        page.locator('span:has-text("微信扫码登录 视频号助手")').first,
-    ]
-    for marker in login_markers:
-        try:
-            if await marker.count() and await marker.is_visible():
-                return False
-        except Exception:
-            continue
-
-    return True
+    return not bool(snapshot["login_marker_visible"])
 
 
 async def _is_tencent_qrcode_expired(page: Page) -> bool:
-    tip_selectors = [
-        'div.mask.show p.refresh-tip:has-text("二维码已过期，点击刷新")',
-        'div.mask.show p.refresh-tip:has-text("网络不可用，点击刷新")',
-        'p.refresh-tip:has-text("二维码已过期，点击刷新")',
-        'p.refresh-tip:has-text("网络不可用，点击刷新")',
-    ]
-    for selector in tip_selectors:
-        tip = page.locator(selector).first
-        try:
-            if await tip.count() and await tip.is_visible():
-                return True
-        except Exception:
-            continue
-    return False
+    return await _has_visible_selector(page, TENCENT_QRCODE_EXPIRED_SELECTORS)
 
 
 async def _is_tencent_qrcode_scanned(page: Page) -> bool:
-    scanned_tips = [
-        'div.qr-tip div:has-text("已扫码")',
-        'div.qr-tip div:has-text("需在手机上进行确认")',
-    ]
-    for selector in scanned_tips:
-        tip = page.locator(selector).first
-        try:
-            if await tip.count() and await tip.is_visible():
-                return True
-        except Exception:
-            continue
-    return False
+    return await _has_visible_selector(page, TENCENT_QRCODE_SCANNED_SELECTORS)
 
 
 async def _refresh_tencent_qrcode(page: Page) -> None:
@@ -308,22 +335,94 @@ async def _wait_for_tencent_login(
     account_file: str,
     qrcode_info: dict,
     qrcode_callback=None,
+    status_callback=None,
+    cancel_event=None,
     poll_interval: int = 3,
     max_checks: int = 100,
 ) -> dict:
     qrcode_path = Path(qrcode_info["image_path"])
     scanned_logged = False
-    for _ in range(max_checks):
-        if await _is_tencent_login_completed(page):
+    last_snapshot_summary = ""
+    for check_index in range(max_checks):
+        if cancel_event and cancel_event.is_set():
+            await _emit_status_callback(
+                status_callback,
+                {
+                    "stage": "login_cancelled",
+                    "detail": f"第{check_index + 1}次轮询前收到取消信号，停止继续等待",
+                },
+            )
+            return _build_login_result(False, "cancelled", "视频号登录已取消", account_file, qrcode_info, page.url)
+
+        snapshot = await _collect_tencent_login_state_snapshot(page)
+        snapshot_summary = _format_tencent_login_state_snapshot(snapshot)
+        if snapshot_summary != last_snapshot_summary or (check_index + 1) % 5 == 0:
+            await _emit_status_callback(
+                status_callback,
+                {
+                    "stage": "poll_snapshot",
+                    "detail": f"第{check_index + 1}次轮询: {snapshot_summary}",
+                },
+            )
+            last_snapshot_summary = snapshot_summary
+
+        if snapshot["publish_ready"]:
             tencent_logger.info(_msg("🥳", f"扫码成功，已经跳转到登录后页面: {page.url}"))
+            await _emit_status_callback(
+                status_callback,
+                {
+                    "stage": "login_completed",
+                    "detail": f"第{check_index + 1}次轮询检测到登录成功，当前页面={page.url}",
+                },
+            )
             return _build_login_result(True, "success", "视频号扫码登录成功", account_file, qrcode_info, page.url)
 
-        if not scanned_logged and await _is_tencent_qrcode_scanned(page):
+        if not scanned_logged and snapshot["scan_tip_visible"]:
             tencent_logger.info(_msg("📱", "已经扫码啦，还差手机端确认一下"))
             scanned_logged = True
+            await _emit_status_callback(
+                status_callback,
+                {
+                    "stage": "scan_detected",
+                    "detail": f"第{check_index + 1}次轮询检测到已扫码，等待手机确认，当前页面={page.url}",
+                },
+            )
+        elif (
+            not scanned_logged
+            and not snapshot["login_marker_visible"]
+            and not snapshot["expired_tip_visible"]
+        ):
+            # 新版页面有时不会展示“已扫码”文案，而是直接把二维码区域收起。
+            scanned_logged = True
+            await _emit_status_callback(
+                status_callback,
+                {
+                    "stage": "scan_assumed",
+                    "detail": (
+                        f"第{check_index + 1}次轮询未命中已扫码文案，但二维码区域已消失，"
+                        f"按已扫码继续被动等待，避免主动跳页打断登录: {snapshot_summary}"
+                    ),
+                },
+            )
 
-        if await _is_tencent_qrcode_expired(page):
+        if scanned_logged and (check_index + 1) % 5 == 0:
+            await _emit_status_callback(
+                status_callback,
+                {
+                    "stage": "awaiting_mobile_confirmation",
+                    "detail": f"已扫码但仍未完成登录，第{check_index + 1}次轮询，当前页面={page.url}",
+                },
+            )
+
+        if snapshot["expired_tip_visible"]:
             tencent_logger.warning(_msg("😵", "二维码失效了，小人马上去刷新"))
+            await _emit_status_callback(
+                status_callback,
+                {
+                    "stage": "qrcode_expired",
+                    "detail": f"第{check_index + 1}次轮询发现二维码失效，准备刷新",
+                },
+            )
             await _refresh_tencent_qrcode(page)
             await asyncio.sleep(1)
             qrcode_info = await _save_tencent_qrcode(
@@ -333,15 +432,31 @@ async def _wait_for_tencent_login(
                 qrcode_callback=qrcode_callback,
             )
             qrcode_path = Path(qrcode_info["image_path"])
+            await _emit_status_callback(
+                status_callback,
+                {
+                    "stage": "qrcode_refreshed",
+                    "detail": f"二维码已刷新，第{check_index + 1}次轮询后继续等待",
+                },
+            )
 
         await asyncio.sleep(poll_interval)
 
+    await _emit_status_callback(
+        status_callback,
+        {
+            "stage": "login_timeout",
+            "detail": f"共轮询{max_checks}次后仍未完成登录，最终页面={page.url}",
+        },
+    )
     return _build_login_result(False, "timeout", "等待视频号扫码登录超时", account_file, qrcode_info, page.url)
 
 
 async def tencent_cookie_gen(
     account_file,
     qrcode_callback=None,
+    status_callback=None,
+    cancel_event=None,
     poll_interval: int = 3,
     max_checks: int = 100,
     headless: bool = LOCAL_CHROME_HEADLESS,
@@ -352,25 +467,65 @@ async def tencent_cookie_gen(
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=headless))
         context = await browser.new_context()
+        context = await set_init_script(context)
         qrcode_path = None
         result = _build_login_result(False, "failed", "视频号登录失败", account_file)
         try:
+            await _emit_status_callback(
+                status_callback,
+                {
+                    "stage": "browser_opened",
+                    "detail": f"浏览器已启动，headless={headless}",
+                },
+            )
+            await _emit_status_callback(
+                status_callback,
+                {
+                    "stage": "stealth_script_applied",
+                    "detail": "浏览器上下文已注入 stealth 脚本",
+                },
+            )
             page = await context.new_page()
             await page.goto(TENCENT_LOGIN_URL)
+            await _emit_status_callback(
+                status_callback,
+                {
+                    "stage": "page_loaded",
+                    "detail": f"登录页已打开，当前页面={page.url}",
+                },
+            )
             qrcode_info = await _save_tencent_qrcode(page, account_file, qrcode_callback=qrcode_callback)
             qrcode_path = Path(qrcode_info["image_path"])
             tencent_logger.info(_msg("🧍", "请扫码，小人正在耐心等待登录完成"))
+            await _emit_status_callback(
+                status_callback,
+                {
+                    "stage": "qrcode_ready",
+                    "detail": f"二维码已生成，临时文件={qrcode_path}",
+                },
+            )
             result = await _wait_for_tencent_login(
                 page,
                 account_file,
                 qrcode_info,
                 qrcode_callback=qrcode_callback,
+                status_callback=status_callback,
+                cancel_event=cancel_event,
                 poll_interval=poll_interval,
                 max_checks=max_checks,
             )
+            if result["status"] == "cancelled":
+                return result
             if result["success"]:
                 await asyncio.sleep(2)
                 await context.storage_state(path=account_file)
+                await _emit_status_callback(
+                    status_callback,
+                    {
+                        "stage": "storage_state_saved",
+                        "detail": f"登录态已保存到账号文件={account_file}",
+                    },
+                )
                 if not await cookie_auth(account_file):
                     result = _build_login_result(
                         False,
@@ -380,8 +535,30 @@ async def tencent_cookie_gen(
                         qrcode_info,
                         page.url,
                     )
+                    await _emit_status_callback(
+                        status_callback,
+                        {
+                            "stage": "cookie_invalid",
+                            "detail": "扫码流程结束，但 cookie 校验失败",
+                        },
+                    )
+                else:
+                    await _emit_status_callback(
+                        status_callback,
+                        {
+                            "stage": "cookie_valid",
+                            "detail": "扫码流程结束，cookie 校验通过",
+                        },
+                    )
             return result
         except Exception as exc:
+            await _emit_status_callback(
+                status_callback,
+                {
+                    "stage": "login_exception",
+                    "detail": f"登录流程抛出异常: {exc}",
+                },
+            )
             result = _build_login_result(
                 False,
                 "failed",
@@ -394,7 +571,9 @@ async def tencent_cookie_gen(
             qrcode_utils = _get_qrcode_utils()
             if qrcode_utils["remove_qrcode_file"](qrcode_path):
                 tencent_logger.info(_msg("🧹", f"临时二维码文件已清理: {qrcode_path}"))
-            if not result["success"]:
+            if result["status"] == "cancelled":
+                tencent_logger.info(_msg("🛑", f"登录已取消: {result['message']}"))
+            elif not result["success"]:
                 tencent_logger.error(_msg("😢", f"登录失败: {result['message']}"))
             await context.close()
             await browser.close()
@@ -405,6 +584,8 @@ async def tencent_setup(
     handle=False,
     return_detail=False,
     qrcode_callback=None,
+    status_callback=None,
+    cancel_event=None,
     headless: bool = LOCAL_CHROME_HEADLESS,
 ):
     account_file = _resolve_account_file(account_file)
@@ -414,15 +595,33 @@ async def tencent_setup(
             return result if return_detail else False
 
         tencent_logger.info(_msg("🥹", "cookie 失效了，准备打开浏览器重新登录"))
-        result = await tencent_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
+        result = await tencent_cookie_gen(
+            account_file,
+            qrcode_callback=qrcode_callback,
+            status_callback=status_callback,
+            cancel_event=cancel_event,
+            headless=headless,
+        )
         return result if return_detail else result["success"]
 
     result = _build_login_result(True, "cookie_valid", "cookie有效", account_file)
     return result if return_detail else True
 
 
-async def get_tencent_cookie(account_file, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS):
-    return await tencent_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
+async def get_tencent_cookie(
+    account_file,
+    qrcode_callback=None,
+    status_callback=None,
+    cancel_event=None,
+    headless: bool = LOCAL_CHROME_HEADLESS,
+):
+    return await tencent_cookie_gen(
+        account_file,
+        qrcode_callback=qrcode_callback,
+        status_callback=status_callback,
+        cancel_event=cancel_event,
+        headless=headless,
+    )
 
 
 async def weixin_setup(
@@ -430,6 +629,8 @@ async def weixin_setup(
     handle=False,
     return_detail=False,
     qrcode_callback=None,
+    status_callback=None,
+    cancel_event=None,
     headless: bool = LOCAL_CHROME_HEADLESS,
 ):
     return await tencent_setup(
@@ -437,6 +638,8 @@ async def weixin_setup(
         handle=handle,
         return_detail=return_detail,
         qrcode_callback=qrcode_callback,
+        status_callback=status_callback,
+        cancel_event=cancel_event,
         headless=headless,
     )
 

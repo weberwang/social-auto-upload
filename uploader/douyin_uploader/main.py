@@ -22,6 +22,8 @@ from utils.log import douyin_logger
 
 DOUYIN_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 DOUYIN_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
+DOUYIN_HOME_URL = "https://creator.douyin.com/creator-micro/home"
+DOUYIN_UPLOAD_URL = "https://creator.douyin.com/creator-micro/content/upload"
 
 
 def _msg(emoji: str, text: str) -> str:
@@ -49,16 +51,29 @@ def _build_login_result(success: bool, status: str, message: str, account_file: 
 
 
 async def cookie_auth(account_file):
+    """校验抖音登录态时优先走轻量创作者页，避免重上传页慢资源导致误判失效。"""
+
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=True, channel="chrome")
         try:
             context = await browser.new_context(storage_state=account_file)
             context = await set_init_script(context)
             page = await context.new_page()
-            await page.goto("https://creator.douyin.com/creator-micro/content/upload")
+
             try:
-                await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload", timeout=5000)
+                await page.goto(DOUYIN_HOME_URL, wait_until="domcontentloaded", timeout=10000)
             except Exception:
+                # 首页偶发超时会回退到上传页再判断，避免单个页面慢资源把已成功登录误判成失效。
+                pass
+
+            try:
+                if not page.url.startswith("https://creator.douyin.com/creator-micro/"):
+                    await page.goto(DOUYIN_UPLOAD_URL, wait_until="domcontentloaded", timeout=10000)
+            except Exception:
+                # 上传页更重，导航超时后继续用当前页面状态兜底判断，而不是直接判失效。
+                pass
+
+            if not page.url.startswith("https://creator.douyin.com/creator-micro/"):
                 return False
 
             if await page.get_by_text("手机号登录").count() or await page.get_by_text("扫码登录").count():
@@ -126,7 +141,7 @@ async def _save_douyin_qrcode(page: Page, account_file: str, previous_qrcode_pat
 
 
 async def _is_douyin_login_completed(page: Page) -> bool:
-    if not page.url.startswith("https://creator.douyin.com/creator-micro/home"):
+    if not page.url.startswith(DOUYIN_HOME_URL):
         return False
 
     login_markers = [

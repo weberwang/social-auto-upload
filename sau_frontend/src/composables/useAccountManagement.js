@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { accountApi } from '../api/account.js'
@@ -29,6 +29,7 @@ export function useAccountManagement() {
   const qrCodeData = ref('')
   const loginStatus = ref('')
   const loginErrorMessage = ref('')
+  const loginSessionId = ref('')
   const accountForm = reactive({
     id: null,
     name: '',
@@ -41,6 +42,17 @@ export function useAccountManagement() {
   }
 
   let eventSource = null
+
+  /**
+   * 重置扫码登录过程状态，避免旧会话信息污染下一次登录。
+   */
+  function resetLoginFlowState() {
+    sseConnecting.value = false
+    qrCodeData.value = ''
+    loginStatus.value = ''
+    loginErrorMessage.value = ''
+    loginSessionId.value = ''
+  }
 
   /**
    * 统一处理手动刷新、自动同步、后台校验，避免多个请求互相覆盖。
@@ -163,10 +175,7 @@ export function useAccountManagement() {
       platform: '',
       status: '正常'
     })
-    sseConnecting.value = false
-    qrCodeData.value = ''
-    loginStatus.value = ''
-    loginErrorMessage.value = ''
+    resetLoginFlowState()
     dialogVisible.value = true
   }
 
@@ -281,10 +290,7 @@ export function useAccountManagement() {
       platform: row.platform,
       status: row.status
     })
-    sseConnecting.value = false
-    qrCodeData.value = ''
-    loginStatus.value = ''
-    loginErrorMessage.value = ''
+    resetLoginFlowState()
     dialogVisible.value = true
 
     setTimeout(() => {
@@ -302,10 +308,35 @@ export function useAccountManagement() {
   /**
    * 关闭当前 SSE 连接，避免多次扫码流程并发写入同一弹窗状态。
    */
-  function closeSSEConnection() {
+  async function cancelLoginSession(sessionId) {
+    if (!sessionId) {
+      return
+    }
+
+    try {
+      await accountApi.cancelLoginSession({ session_id: sessionId })
+      console.info('[账号登录][SSE] 已请求后端取消登录会话', { sessionId })
+    } catch (error) {
+      console.warn('[账号登录][SSE] 取消登录会话失败', { sessionId, error })
+    }
+  }
+
+  /**
+   * 关闭当前 SSE 连接，并按需通知后端结束本次扫码登录会话。
+   */
+  function closeSSEConnection({ notifyBackend = false, keepSessionId = false } = {}) {
+    const sessionId = loginSessionId.value
     if (eventSource) {
       eventSource.close()
       eventSource = null
+    }
+
+    if (notifyBackend && sessionId) {
+      void cancelLoginSession(sessionId)
+    }
+
+    if (!keepSessionId) {
+      loginSessionId.value = ''
     }
   }
 
@@ -318,34 +349,70 @@ export function useAccountManagement() {
       return
     }
 
-    closeSSEConnection()
+    closeSSEConnection({ notifyBackend: true })
+    resetLoginFlowState()
     sseConnecting.value = true
-    qrCodeData.value = ''
-    loginStatus.value = ''
-    loginErrorMessage.value = ''
 
     const type = String(ACCOUNT_PLATFORM_TYPE_BY_LABEL[platform] || 1)
     const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5409'
     const url = `${baseUrl}/login?type=${type}&id=${encodeURIComponent(name)}`
+    console.info('[账号登录][SSE] 准备建立连接', { platform, name, type, url })
 
     eventSource = new EventSource(url)
 
+    eventSource.onopen = () => {
+      console.info('[账号登录][SSE] 连接已打开', { platform, name, type })
+    }
+
     eventSource.onmessage = (event) => {
       const data = event.data
+      console.debug('[账号登录][SSE] 收到消息', { platform, name, data })
+
+      if (data.startsWith('SESSION:')) {
+        loginSessionId.value = data.slice('SESSION:'.length).trim()
+        console.info('[账号登录][SSE] 收到会话标识', {
+          platform,
+          name,
+          sessionId: loginSessionId.value
+        })
+        return
+      }
 
       if (!qrCodeData.value && data.length > 100) {
         try {
           qrCodeData.value = data.startsWith('data:image')
             ? data
             : `data:image/png;base64,${data}`
+          console.info('[账号登录][SSE] 已更新二维码展示', {
+            platform,
+            name,
+            payloadLength: data.length
+          })
         } catch (error) {
           console.error('处理二维码数据失败:', error)
         }
         return
       }
 
+      if (data.startsWith('LOG:')) {
+        console.debug('[账号登录][SSE][调试]', data)
+        return
+      }
+
       if (data.startsWith('ERROR:')) {
         loginErrorMessage.value = data.slice('ERROR:'.length).trim()
+        console.warn('[账号登录][SSE] 收到错误消息', {
+          platform,
+          name,
+          message: loginErrorMessage.value
+        })
+        return
+      }
+
+      if (data === 'CANCELLED') {
+        console.info('[账号登录][SSE] 会话已取消', { platform, name, sessionId: loginSessionId.value })
+        closeSSEConnection()
+        resetLoginFlowState()
         return
       }
 
@@ -354,6 +421,7 @@ export function useAccountManagement() {
       }
 
       loginStatus.value = data
+      console.info('[账号登录][SSE] 收到终态', { platform, name, status: data })
       if (data === '200') {
         setTimeout(() => {
           closeSSEConnection()
@@ -397,7 +465,7 @@ export function useAccountManagement() {
     eventSource.onerror = (error) => {
       console.error('SSE连接错误:', error)
       ElMessage.error('连接服务器失败，请稍后再试')
-      closeSSEConnection()
+      closeSSEConnection({ notifyBackend: true })
       sseConnecting.value = false
     }
   }
@@ -495,10 +563,20 @@ export function useAccountManagement() {
   })
 
   /**
+   * 用户手动关闭弹窗时，需要同步取消后端轮询，避免无主会话继续跑满超时。
+   */
+  watch(dialogVisible, (visible) => {
+    if (!visible && (eventSource || loginSessionId.value)) {
+      closeSSEConnection({ notifyBackend: true })
+      resetLoginFlowState()
+    }
+  })
+
+  /**
    * 页面销毁时主动断开 SSE，避免离页后仍然占用浏览器连接。
    */
   onBeforeUnmount(() => {
-    closeSSEConnection()
+    closeSSEConnection({ notifyBackend: true })
   })
 
   return {

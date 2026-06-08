@@ -30,8 +30,61 @@ from myUtils.publish_drafts import (
 from myUtils.web_publish import PublishRequestError, dispatch_web_publish_request, parse_web_publish_request
 from utils.log import bilibili_logger
 
-active_queues = {}
+TERMINAL_SSE_MESSAGES = {"200", "500", "CANCELLED"}
+active_login_sessions = {}
+active_login_sessions_lock = threading.Lock()
 app = Flask(__name__)
+
+
+def _summarize_sse_message(message: str) -> str:
+    """压缩超长 SSE 消息，避免二维码 data URL 把日志刷满。"""
+
+    if message.startswith("data:image"):
+        return f"{message[:48]}...(len={len(message)})"
+    return message
+
+
+def _register_login_session(
+    session_id: str,
+    platform_type: str,
+    account_name: str,
+    status_queue: Queue,
+    cancel_event: threading.Event,
+) -> None:
+    """登记登录会话，供取消接口和 SSE 终态清理共享。"""
+
+    with active_login_sessions_lock:
+        active_login_sessions[session_id] = {
+            "platform_type": platform_type,
+            "account_name": account_name,
+            "status_queue": status_queue,
+            "cancel_event": cancel_event,
+            "status": "active",
+        }
+
+
+def _get_login_session(session_id: str) -> dict | None:
+    """读取登录会话快照；会话可能已结束，因此允许返回空。"""
+
+    with active_login_sessions_lock:
+        session = active_login_sessions.get(session_id)
+        return dict(session) if session else None
+
+
+def _set_login_session_status(session_id: str, status: str) -> None:
+    """更新登录会话状态，避免取消、成功、失败互相覆盖。"""
+
+    with active_login_sessions_lock:
+        session = active_login_sessions.get(session_id)
+        if session:
+            session["status"] = status
+
+
+def _cleanup_login_session(session_id: str) -> None:
+    """清理登录会话，避免轮询线程和 SSE 队列残留。"""
+
+    with active_login_sessions_lock:
+        active_login_sessions.pop(session_id, None)
 
 #允许所有来源跨域访问
 CORS(app)
@@ -473,20 +526,59 @@ def login():
 
     # 模拟一个用于异步通信的队列
     status_queue = Queue()
-    active_queues[id] = status_queue
-
-    def on_close():
-        print(f"清理队列: {id}")
-        del active_queues[id]
+    cancel_event = threading.Event()
+    session_id = str(uuid.uuid4())
+    _register_login_session(session_id, str(type), str(id), status_queue, cancel_event)
+    status_queue.put(f"SESSION:{session_id}")
+    print(
+        f"[LOGIN] 建立 SSE 登录连接: session_id={session_id}, platform_type={type}, account={id}",
+        flush=True,
+    )
     # 启动异步任务线程
-    thread = threading.Thread(target=run_async_function, args=(type,id,status_queue), daemon=True)
+    thread = threading.Thread(
+        target=run_async_function,
+        args=(type, id, status_queue, cancel_event, session_id),
+        daemon=True,
+    )
     thread.start()
-    response = Response(sse_stream(status_queue,), mimetype='text/event-stream')
+    response = Response(sse_stream(status_queue, cancel_event, session_id), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['X-Accel-Buffering'] = 'no'  # 关键：禁用 Nginx 缓冲
     response.headers['Content-Type'] = 'text/event-stream'
     response.headers['Connection'] = 'keep-alive'
     return response
+
+
+@app.route("/login/cancel", methods=["POST"])
+def cancel_login():
+    """取消指定登录会话，停止轮询并让 SSE 尽快收敛到终态。"""
+
+    request_data = request.get_json(silent=True) or {}
+    session_id = str(request_data.get("session_id") or "").strip()
+    if not session_id:
+        return jsonify({"code": 400, "msg": "缺少 session_id", "data": None}), 400
+
+    session = _get_login_session(session_id)
+    if not session:
+        return jsonify({"code": 200, "msg": "登录会话已结束", "data": {"session_id": session_id}}), 200
+
+    if session["status"] in {"success", "failed", "timeout", "cancelled"}:
+        return jsonify(
+            {
+                "code": 200,
+                "msg": "登录会话已是终态",
+                "data": {"session_id": session_id, "status": session["status"]},
+            }
+        ), 200
+
+    cancel_event = session["cancel_event"]
+    status_queue = session["status_queue"]
+    cancel_event.set()
+    _set_login_session_status(session_id, "cancelled")
+    status_queue.put(f"LOG:登录会话:cancel_requested:会话已取消，session_id={session_id}")
+    status_queue.put("CANCELLED")
+    print(f"[LOGIN] 收到取消请求: session_id={session_id}", flush=True)
+    return jsonify({"code": 200, "msg": "登录会话已取消", "data": {"session_id": session_id}}), 200
 
 @app.route('/postVideo', methods=['POST'])
 def postVideo():
@@ -759,7 +851,11 @@ def download_cookie():
 
 
 # 包装函数：在线程中运行异步函数
-def run_async_function(type,id,status_queue):
+def run_async_function(type,id,status_queue,cancel_event,session_id):
+    print(
+        f"[LOGIN] 登录线程启动: session_id={session_id}, platform_type={type}, account={id}",
+        flush=True,
+    )
     try:
         match type:
             case '1':
@@ -770,7 +866,14 @@ def run_async_function(type,id,status_queue):
             case '2':
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                loop.run_until_complete(get_tencent_cookie(id,status_queue))
+                loop.run_until_complete(
+                    get_tencent_cookie(
+                        id,
+                        status_queue,
+                        cancel_event=cancel_event,
+                        session_id=session_id,
+                    )
+                )
                 loop.close()
             case '3':
                 loop = asyncio.new_event_loop()
@@ -787,21 +890,45 @@ def run_async_function(type,id,status_queue):
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(bilibili_cookie_gen(id, status_queue))
                 loop.close()
+        if cancel_event.is_set():
+            print(f"[LOGIN] 登录线程结束: session_id={session_id}, status=cancelled", flush=True)
+        else:
+            print(
+                f"[LOGIN] 登录线程结束: session_id={session_id}, platform_type={type}, account={id}",
+                flush=True,
+            )
     except Exception as exc:
         # 线程内异常如果不兜底，前端只能看到超时或空白，这里统一落日志并回传摘要。
         bilibili_logger.exception(f"历史 Web 登录线程异常，平台类型={type}，账号名={id}，错误={exc}")
         status_queue.put(f"ERROR:登录线程异常：{exc}")
         status_queue.put("500")
+        _set_login_session_status(session_id, "failed")
 
 # SSE 流生成器函数
-def sse_stream(status_queue):
-    while True:
-        if not status_queue.empty():
-            msg = status_queue.get()
-            yield f"data: {msg}\n\n"
-        else:
-            # 避免 CPU 占满
-            time.sleep(0.1)
+def sse_stream(status_queue, cancel_event, session_id):
+    """持续推送登录过程消息，并在终态或取消后结束流与清理会话。"""
+
+    try:
+        while True:
+            if not status_queue.empty():
+                msg = status_queue.get()
+                print(f"[LOGIN][SSE->CLIENT] {_summarize_sse_message(msg)}", flush=True)
+                yield f"data: {msg}\n\n"
+                if msg in TERMINAL_SSE_MESSAGES:
+                    if msg == "200":
+                        _set_login_session_status(session_id, "success")
+                    elif msg == "500":
+                        _set_login_session_status(session_id, "failed")
+                    else:
+                        _set_login_session_status(session_id, "cancelled")
+                    break
+            elif cancel_event.is_set():
+                break
+            else:
+                # 避免 CPU 占满
+                time.sleep(0.1)
+    finally:
+        _cleanup_login_session(session_id)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0' ,port=5409)

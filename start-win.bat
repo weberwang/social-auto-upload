@@ -5,9 +5,14 @@ TITLE social-auto-upload starter
 cd /d "%~dp0"
 
 set "ROOT_DIR=%CD%"
-set "PYTHON_EXE=%ROOT_DIR%\.venv\Scripts\python.exe"
+set "PYTHON_EXE="
+set "PYTHON_SOURCE="
+set "VENV_PYTHON_EXE=%ROOT_DIR%\.venv\Scripts\python.exe"
 set "BACKEND_ENTRY=%ROOT_DIR%\sau_backend.py"
 set "BACKEND_DEPENDENCY_CHECK=%ROOT_DIR%\scripts\check_backend_dependencies.py"
+set "DB_INIT_SCRIPT=%ROOT_DIR%\db\createTable.py"
+set "BACKEND_CONF=%ROOT_DIR%\conf.py"
+set "BACKEND_CONF_TEMPLATE=%ROOT_DIR%\conf.example.py"
 set "FRONTEND_DIR=%ROOT_DIR%\sau_frontend"
 set "WAIT_PORT_SCRIPT=%ROOT_DIR%\scripts\wait-port.ps1"
 set "FRONTEND_START_SCRIPT=%ROOT_DIR%\scripts\start-frontend-dev.ps1"
@@ -21,9 +26,20 @@ echo  Starting social-auto-upload
 echo ==================================================
 echo.
 
-if not exist "%PYTHON_EXE%" (
-    echo [ERROR] Missing virtualenv interpreter: %PYTHON_EXE%
-    echo [HINT] Create the project .venv before running this script.
+python --version >nul 2>nul
+if not errorlevel 1 (
+    set "PYTHON_EXE=python"
+    set "PYTHON_SOURCE=PATH"
+)
+
+if not defined PYTHON_EXE if exist "%VENV_PYTHON_EXE%" (
+    set "PYTHON_EXE=%VENV_PYTHON_EXE%"
+    set "PYTHON_SOURCE=.venv"
+)
+
+if not defined PYTHON_EXE (
+    echo [ERROR] No available Python interpreter was found.
+    echo [HINT] Install Python and make sure ^`python^` is on PATH, or create %VENV_PYTHON_EXE%.
     goto :fail
 )
 
@@ -35,6 +51,26 @@ if not exist "%BACKEND_ENTRY%" (
 if not exist "%BACKEND_DEPENDENCY_CHECK%" (
     echo [ERROR] Missing backend dependency checker: %BACKEND_DEPENDENCY_CHECK%
     goto :fail
+)
+
+if not exist "%DB_INIT_SCRIPT%" (
+    echo [ERROR] Missing database init script: %DB_INIT_SCRIPT%
+    goto :fail
+)
+
+if not exist "%BACKEND_CONF%" (
+    if not exist "%BACKEND_CONF_TEMPLATE%" (
+        echo [ERROR] Missing backend config template: %BACKEND_CONF_TEMPLATE%
+        goto :fail
+    )
+
+    REM 启动脚本自动补一份默认配置，避免首次启动时因为缺少 conf.py 直接崩溃。
+    echo [preflight] Missing conf.py, creating it from conf.example.py...
+    copy /Y "%BACKEND_CONF_TEMPLATE%" "%BACKEND_CONF%" >nul
+    if errorlevel 1 (
+        echo [ERROR] Failed to create backend config: %BACKEND_CONF%
+        goto :fail
+    )
 )
 
 if not exist "%WAIT_PORT_SCRIPT%" (
@@ -68,6 +104,7 @@ if errorlevel 1 (
     goto :fail
 )
 
+echo [preflight] Using Python from %PYTHON_SOURCE%: %PYTHON_EXE%
 echo [preflight] Checking backend Python dependencies...
 "%PYTHON_EXE%" "%BACKEND_DEPENDENCY_CHECK%"
 if errorlevel 1 (
@@ -84,6 +121,13 @@ if errorlevel 1 (
         echo [ERROR] Backend dependencies are still incomplete after installation.
         goto :fail
     )
+)
+
+echo [preflight] Initializing database schema...
+"%PYTHON_EXE%" "%DB_INIT_SCRIPT%"
+if errorlevel 1 (
+    echo [ERROR] Failed to initialize the database schema.
+    goto :fail
 )
 
 echo [0/2] Stopping old backend processes...

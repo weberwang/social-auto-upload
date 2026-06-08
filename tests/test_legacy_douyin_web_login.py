@@ -1,12 +1,24 @@
 import asyncio
+import importlib
 import shutil
 import sqlite3
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import myUtils.login as legacy_login
+conf_stub = types.ModuleType("conf")
+conf_stub.BASE_DIR = Path(".")
+conf_stub.DEBUG_MODE = True
+conf_stub.LOCAL_CHROME_HEADLESS = True
+conf_stub.LOCAL_CHROME_PATH = ""
+conf_stub.XHS_SERVER = "http://127.0.0.1:11901"
+sys.modules["conf"] = conf_stub
+
+sys.modules.pop("myUtils.login", None)
+legacy_login = importlib.import_module("myUtils.login")
 
 
 class _MemoryQueue:
@@ -65,6 +77,8 @@ class LegacyDouyinWebLoginTests(unittest.TestCase):
             with patch("myUtils.login.BASE_DIR", base_dir), patch(
                 "myUtils.login.uuid.uuid1", return_value="fixed-uuid"
             ), patch(
+                "builtins.print"
+            ), patch(
                 "myUtils.login.mainline_douyin_cookie_gen",
                 new=AsyncMock(side_effect=fake_mainline),
             ):
@@ -98,6 +112,8 @@ class LegacyDouyinWebLoginTests(unittest.TestCase):
 
             with patch("myUtils.login.BASE_DIR", base_dir), patch(
                 "myUtils.login.uuid.uuid1", return_value="fixed-uuid"
+            ), patch(
+                "builtins.print"
             ), patch(
                 "myUtils.login.mainline_douyin_cookie_gen",
                 new=AsyncMock(side_effect=fake_mainline),

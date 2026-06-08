@@ -17,6 +17,11 @@ export const accountApi = {
     return http.post('/account', data)
   },
 
+  // 取消扫码登录会话
+  cancelLoginSession(data) {
+    return http.post('/login/cancel', data)
+  },
+
   // 更新账号
   updateAccount(data) {
     return http.post('/updateUserinfo', data)

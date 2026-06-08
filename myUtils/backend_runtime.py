@@ -8,6 +8,12 @@ REQUIRED_BACKEND_MODULES = (
     "jinja2",
     "blinker",
     "itsdangerous",
+    "segno",
+    "playwright",
+    "patchright",
+    "xhs",
+    "loguru",
+    "cv2",
 )
 
 

@@ -9,6 +9,8 @@ from xhs import XhsClient
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS
 from myUtils.bilibili_web_bridge import check_bilibili_account_file
+from uploader.douyin_uploader.main import cookie_auth as mainline_douyin_cookie_auth
+from uploader.tencent_uploader.main import cookie_auth as mainline_tencent_cookie_auth
 from utils.base_social_media import set_init_script
 from utils.log import tencent_logger, kuaishou_logger, douyin_logger, xhs_logger
 from uploader.xhs_uploader.main import sign_local
@@ -44,51 +46,15 @@ async def _run_cookie_validator(
 
 
 async def cookie_auth_douyin(account_file):
-    """校验抖音账号 Cookie 是否仍然有效。"""
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS)
-        context = await browser.new_context(storage_state=account_file)
-        context = await set_init_script(context)
-        # 创建一个新的页面
-        page = await context.new_page()
-        # 访问指定的 URL
-        await page.goto("https://creator.douyin.com/creator-micro/content/upload")
-        try:
-            await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload", timeout=5000)
-            # 2024.06.17 抖音创作者中心改版
-            # 判断
-            # 等待“扫码登录”元素出现，超时 5 秒（如果 5 秒没出现，说明 cookie 有效）
-            try:
-                await page.get_by_text("扫码登录").wait_for(timeout=5000)
-                douyin_logger.error("[+] cookie 失效，需要扫码登录")
-                return False
-            except:
-                douyin_logger.success("[+]  cookie 有效")
-                return True
-        except:
-            douyin_logger.error("[+] 等待5秒 cookie 失效")
-            await context.close()
-            await browser.close()
-            return False
+    """复用主线抖音 Cookie 校验器，避免登录与账号列表走两套不同的页面探测逻辑。"""
+
+    return await mainline_douyin_cookie_auth(account_file)
 
 
 async def cookie_auth_tencent(account_file):
-    """校验微信视频号账号 Cookie 是否仍然有效。"""
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS)
-        context = await browser.new_context(storage_state=account_file)
-        context = await set_init_script(context)
-        # 创建一个新的页面
-        page = await context.new_page()
-        # 访问指定的 URL
-        await page.goto("https://channels.weixin.qq.com/platform/post/create")
-        try:
-            await page.wait_for_selector('div.title-name:has-text("微信小店")', timeout=5000)  # 等待5秒
-            tencent_logger.error("[+] 等待5秒 cookie 失效")
-            return False
-        except:
-            tencent_logger.success("[+] cookie 有效")
-            return True
+    """复用主线视频号 Cookie 校验器，确保登录与账号列表共享同一套浏览器策略。"""
+
+    return await mainline_tencent_cookie_auth(account_file)
 
 
 async def cookie_auth_ks(account_file):
