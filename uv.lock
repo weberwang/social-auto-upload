@@ -443,6 +443,7 @@ name = "social-auto-upload"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "flask", extra = ["async"] },
     { name = "loguru" },
     { name = "opencv-python" },
     { name = "patchright" },
@@ -453,13 +454,12 @@ dependencies = [
 
 [package.optional-dependencies]
 web = [
-    { name = "flask", extra = ["async"] },
     { name = "flask-cors" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "flask", extras = ["async"], marker = "extra == 'web'", specifier = "==3.1.1" },
+    { name = "flask", extras = ["async"], specifier = "==3.1.1" },
     { name = "flask-cors", marker = "extra == 'web'", specifier = "==6.0.0" },
     { name = "loguru", specifier = "==0.7.3" },
     { name = "opencv-python", specifier = ">=4.13.0.92" },

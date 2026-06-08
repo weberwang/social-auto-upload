@@ -10,6 +10,7 @@ set "PYTHON_SOURCE="
 set "VENV_PYTHON_EXE=%ROOT_DIR%\.venv\Scripts\python.exe"
 set "BACKEND_ENTRY=%ROOT_DIR%\sau_backend.py"
 set "BACKEND_DEPENDENCY_CHECK=%ROOT_DIR%\scripts\check_backend_dependencies.py"
+set "PYTHON_BOOTSTRAP_SCRIPT=%ROOT_DIR%\scripts\ensure-backend-python.ps1"
 set "DB_INIT_SCRIPT=%ROOT_DIR%\db\createTable.py"
 set "BACKEND_CONF=%ROOT_DIR%\conf.py"
 set "BACKEND_CONF_TEMPLATE=%ROOT_DIR%\conf.example.py"
@@ -18,6 +19,8 @@ set "WAIT_PORT_SCRIPT=%ROOT_DIR%\scripts\wait-port.ps1"
 set "FRONTEND_START_SCRIPT=%ROOT_DIR%\scripts\start-frontend-dev.ps1"
 set "BACKEND_STOP_SCRIPT=%ROOT_DIR%\scripts\stop-backend-processes.ps1"
 set "BACKEND_PORT=5409"
+set "PYPROJECT_FILE=%ROOT_DIR%\pyproject.toml"
+set "UV_LOCK_FILE=%ROOT_DIR%\uv.lock"
 set "REQUIREMENTS_FILE=%ROOT_DIR%\requirements.txt"
 set "PYTHONUNBUFFERED=1"
 
@@ -26,23 +29,6 @@ echo  Starting social-auto-upload
 echo ==================================================
 echo.
 
-python --version >nul 2>nul
-if not errorlevel 1 (
-    set "PYTHON_EXE=python"
-    set "PYTHON_SOURCE=PATH"
-)
-
-if not defined PYTHON_EXE if exist "%VENV_PYTHON_EXE%" (
-    set "PYTHON_EXE=%VENV_PYTHON_EXE%"
-    set "PYTHON_SOURCE=.venv"
-)
-
-if not defined PYTHON_EXE (
-    echo [ERROR] No available Python interpreter was found.
-    echo [HINT] Install Python and make sure ^`python^` is on PATH, or create %VENV_PYTHON_EXE%.
-    goto :fail
-)
-
 if not exist "%BACKEND_ENTRY%" (
     echo [ERROR] Missing backend entry: %BACKEND_ENTRY%
     goto :fail
@@ -50,6 +36,11 @@ if not exist "%BACKEND_ENTRY%" (
 
 if not exist "%BACKEND_DEPENDENCY_CHECK%" (
     echo [ERROR] Missing backend dependency checker: %BACKEND_DEPENDENCY_CHECK%
+    goto :fail
+)
+
+if not exist "%PYTHON_BOOTSTRAP_SCRIPT%" (
+    echo [ERROR] Missing Python bootstrap helper: %PYTHON_BOOTSTRAP_SCRIPT%
     goto :fail
 )
 
@@ -104,23 +95,10 @@ if errorlevel 1 (
     goto :fail
 )
 
-echo [preflight] Using Python from %PYTHON_SOURCE%: %PYTHON_EXE%
-echo [preflight] Checking backend Python dependencies...
-"%PYTHON_EXE%" "%BACKEND_DEPENDENCY_CHECK%"
+for /f "usebackq delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%PYTHON_BOOTSTRAP_SCRIPT%" -VenvPythonExe "%VENV_PYTHON_EXE%" -PyprojectFile "%PYPROJECT_FILE%" -UvLockFile "%UV_LOCK_FILE%" -RequirementsFile "%REQUIREMENTS_FILE%" -DependencyCheckScript "%BACKEND_DEPENDENCY_CHECK%"`) do %%I
 if errorlevel 1 (
-    echo [INFO] Backend dependencies are incomplete. Installing from requirements.txt...
-    "%PYTHON_EXE%" -m pip install -r "%REQUIREMENTS_FILE%"
-    if errorlevel 1 (
-        echo [ERROR] Failed to install backend dependencies.
-        goto :fail
-    )
-
-    echo [preflight] Re-checking backend Python dependencies...
-    "%PYTHON_EXE%" "%BACKEND_DEPENDENCY_CHECK%"
-    if errorlevel 1 (
-        echo [ERROR] Backend dependencies are still incomplete after installation.
-        goto :fail
-    )
+    echo [ERROR] Failed to prepare backend Python environment.
+    goto :fail
 )
 
 echo [preflight] Initializing database schema...
