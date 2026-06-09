@@ -8,6 +8,7 @@ from pathlib import Path
 from queue import Queue
 from flask_cors import CORS
 from myUtils.auth import check_cookie
+from myUtils.douyin_metrics import DouyinMetricsError, fetch_douyin_account_metrics
 from myUtils.material_records import (
     build_material_filter_clause,
     build_material_order_clause,
@@ -392,6 +393,48 @@ async def getValidAccounts():
                             "msg": None,
                             "data": rows_list
                         }),200
+
+
+@app.route("/getDouyinAccountMetrics", methods=["GET"])
+def get_douyin_account_metrics():
+    """返回单个抖音账号的当前运营概览，第一版仅复用现有登录态做实时抓取。"""
+
+    account_id = request.args.get("id")
+    if not account_id or not account_id.isdigit():
+        return jsonify({"code": 400, "msg": "账号 ID 非法", "data": None}), 400
+
+    try:
+        with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM user_info WHERE id = ?", (int(account_id),))
+            account_row = cursor.fetchone()
+
+        if not account_row:
+            return jsonify({"code": 404, "msg": "账号不存在", "data": None}), 404
+        if int(account_row["type"]) != 3:
+            return jsonify({"code": 400, "msg": "仅支持抖音账号查询运营数据", "data": None}), 400
+
+        cookie_file_path = Path(BASE_DIR / "cookiesFile" / account_row["filePath"])
+        # 第一版直接按账号实时抓取，先验证链路稳定性，再决定是否补快照落库。
+        metrics_snapshot = asyncio.run(
+            fetch_douyin_account_metrics(cookie_file_path, str(account_row["userName"]))
+        )
+        return jsonify(
+            {
+                "code": 200,
+                "msg": "success",
+                "data": {
+                    "platform": "douyin",
+                    **metrics_snapshot.to_dict(),
+                },
+            }
+        ), 200
+    except DouyinMetricsError as error:
+        return jsonify({"code": 400, "msg": str(error), "data": None}), 400
+    except Exception as error:
+        print(f"获取抖音运营数据时出错: {error}")
+        return jsonify({"code": 500, "msg": f"获取抖音运营数据失败: {error}", "data": None}), 500
 
 @app.route('/deleteFile', methods=['GET'])
 def delete_file():
