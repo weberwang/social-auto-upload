@@ -2,9 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { buildPublishPayloadFromState } from '../src/constants/publishPayload.js'
-import { flattenPublishTabState, createDefaultPublishTabState } from '../src/constants/publishTabState.js'
+import { createDefaultPublishTabState, flattenPublishTabState } from '../src/constants/publishTabState.js'
 
-test('视频号视频 payload 应包含基础字段与 tencent 平台增强字段', () => {
+test('视频号视频 payload 应包含基础字段和 tencent 平台增强字段', () => {
   const tab = flattenPublishTabState(createDefaultPublishTabState({
     platform: {
       selectedPlatform: 2,
@@ -54,4 +54,34 @@ test('视频号视频 payload 应包含基础字段与 tencent 平台增强字�
   assert.equal(payload.platformFields.tencent.isDraft, true)
   assert.deepEqual(payload.fileList, ['/media/video-a.mp4'])
   assert.deepEqual(payload.accountList, ['tencent_creator.json'])
+})
+
+test('多账号发布时 payload 应映射全部账号文件与账号名称', () => {
+  const tab = flattenPublishTabState(createDefaultPublishTabState({
+    platform: {
+      selectedPlatform: 3,
+      contentType: 'video'
+    },
+    materials: {
+      fileList: [
+        {
+          name: 'video-a.mp4',
+          path: '/media/video-a.mp4'
+        }
+      ]
+    },
+    accounts: {
+      selectedAccountIds: ['acct-1', 'acct-2']
+    },
+    baseFields: {
+      title: '批量账号标题'
+    }
+  }))
+  const payload = buildPublishPayloadFromState(tab, [
+    { id: 'acct-1', filePath: 'douyin_creator_1.json', name: '抖音主号' },
+    { id: 'acct-2', filePath: 'douyin_creator_2.json', name: '抖音备用号' }
+  ])
+
+  assert.deepEqual(payload.accountList, ['douyin_creator_1.json', 'douyin_creator_2.json'])
+  assert.deepEqual(payload.accountNameList, ['抖音主号', '抖音备用号'])
 })

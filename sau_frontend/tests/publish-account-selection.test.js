@@ -6,7 +6,7 @@ import {
 } from '../src/constants/publishPlatforms.js'
 
 /**
- * 构造发布中心账号下拉测试数据，覆盖同平台多账号和跨平台过滤场景。
+ * 构造发布中心账号选择测试数据，覆盖同平台多账号和跨平台过滤场景。
  */
 function buildAccounts() {
   return [
@@ -37,9 +37,16 @@ test('当前平台没有账号时应返回空数组', () => {
   )
 })
 
-test('当前平台存在多个旧选中账号时应只保留第一个合法账号', () => {
+test('当前平台存在多个合法账号时应保留全部合法账号', () => {
   assert.deepEqual(
     getDefaultSelectedAccountIdsForPlatform(buildAccounts(), ['xhs-2', 'xhs-1'], 1),
-    ['xhs-2']
+    ['xhs-2', 'xhs-1']
+  )
+})
+
+test('当前平台混入跨平台账号时应只保留当前平台账号', () => {
+  assert.deepEqual(
+    getDefaultSelectedAccountIdsForPlatform(buildAccounts(), ['dy-1', 'xhs-2', 'xhs-1'], 1),
+    ['xhs-2', 'xhs-1']
   )
 })

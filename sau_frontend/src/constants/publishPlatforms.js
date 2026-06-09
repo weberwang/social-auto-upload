@@ -163,15 +163,15 @@ export function getAvailableAccountsForPlatform(accounts, platformKey) {
 }
 
 /**
- * 账号选择改为下拉单选后，统一收敛为“保留首个合法账号，否则默认当前平台第一个账号”。
+ * 多账号场景下保留当前平台全部合法账号；如果一个都没有，再回填该平台第一个账号。
  */
 export function getDefaultSelectedAccountIdsForPlatform(accounts, selectedAccountIds, platformKey) {
   const availableAccounts = getAvailableAccountsForPlatform(accounts, platformKey)
   const availableAccountIds = new Set(availableAccounts.map((account) => account.id))
-  const firstMatchedAccountId = selectedAccountIds.find((accountId) => availableAccountIds.has(accountId))
+  const matchedAccountIds = selectedAccountIds.filter((accountId) => availableAccountIds.has(accountId))
 
-  if (firstMatchedAccountId) {
-    return [firstMatchedAccountId]
+  if (matchedAccountIds.length > 0) {
+    return matchedAccountIds
   }
 
   if (availableAccounts.length > 0) {
