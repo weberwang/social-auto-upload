@@ -73,6 +73,14 @@ def post_video_tencent(
     daily_times=None,
     start_days=0,
     is_draft=False,
+    thumbnail_path="",
+    thumbnail_landscape_path="",
+    thumbnail_portrait_path="",
+    short_title="",
+    collection_name="",
+    declare_original=False,
+    original_type="",
+    content_declaration="",
 ):
     """按既有方式把视频号视频请求分发到 uploader。"""
 
@@ -92,7 +100,24 @@ def post_video_tencent(
             print(f"视频文件名：{file}")
             print(f"标题：{title}")
             print(f"Hashtag：{tags}")
-            app = TencentVideo(title, str(file), tags, publish_datetimes[index], cookie, category, is_draft)
+            # 视频号平台专属字段统一在桥接层显式透传，避免发布中心和 CLI 长期维护两套不一致能力面。
+            app = TencentVideo(
+                title=title,
+                file_path=str(file),
+                tags=tags,
+                publish_date=publish_datetimes[index],
+                account_file=cookie,
+                category=category,
+                is_draft=is_draft,
+                thumbnail_path=thumbnail_path or None,
+                thumbnail_landscape_path=thumbnail_landscape_path or None,
+                thumbnail_portrait_path=thumbnail_portrait_path or None,
+                short_title=short_title or None,
+            )
+            app.collection_name = collection_name
+            app.declare_original = declare_original
+            app.original_type = original_type
+            app.content_declaration = content_declaration
             asyncio.run(app.main(), debug=False)
 
 
@@ -109,6 +134,9 @@ def post_video_DouYin(
     thumbnail_path="",
     productLink="",
     productTitle="",
+    location="",
+    self_declaration="内容为个人观点或见解",
+    sync_to_toutiao_xigua=True,
 ):
     """按既有方式把抖音视频请求分发到 uploader。"""
 
@@ -128,7 +156,21 @@ def post_video_DouYin(
             print(f"视频文件名：{file}")
             print(f"标题：{title}")
             print(f"Hashtag：{tags}")
-            app = DouYinVideo(title, str(file), tags, publish_datetimes[index], cookie, thumbnail_path, productLink, productTitle)
+            # 抖音专属字段统一走关键字参数，避免位置参数和 uploader 构造函数继续隐式耦合。
+            app = DouYinVideo(
+                title=title,
+                file_path=str(file),
+                tags=tags,
+                publish_date=publish_datetimes[index],
+                account_file=cookie,
+                thumbnail_portrait_path=thumbnail_path or None,
+                productLink=productLink,
+                productTitle=productTitle,
+                desc=title,
+                location=location,
+                self_declaration=self_declaration,
+                sync_to_toutiao_xigua=sync_to_toutiao_xigua,
+            )
             asyncio.run(app.douyin_upload_video(), debug=False)
 
 
@@ -142,6 +184,7 @@ def post_video_ks(
     videos_per_day=DEFAULT_VIDEOS_PER_DAY,
     daily_times=None,
     start_days=0,
+    thumbnail_path="",
 ):
     """按既有方式把快手视频请求分发到 uploader。"""
 
@@ -161,7 +204,15 @@ def post_video_ks(
             print(f"视频文件名：{file}")
             print(f"标题：{title}")
             print(f"Hashtag：{tags}")
-            app = KSVideo(title, str(file), tags, publish_datetimes[index], cookie)
+            # 快手视频专属封面直接复用主线 uploader 的 thumbnail_path，避免历史 Web 桥接继续丢字段。
+            app = KSVideo(
+                title=title,
+                file_path=str(file),
+                tags=tags,
+                publish_date=publish_datetimes[index],
+                account_file=cookie,
+                thumbnail_path=thumbnail_path or None,
+            )
             asyncio.run(app.main(), debug=False)
 
 
@@ -175,6 +226,8 @@ def post_video_xhs(
     videos_per_day=DEFAULT_VIDEOS_PER_DAY,
     daily_times=None,
     start_days=0,
+    thumbnail_path="",
+    location="",
 ):
     """按既有方式把小红书视频请求分发到 uploader。"""
 
@@ -193,7 +246,16 @@ def post_video_xhs(
             print(f"视频文件名：{file}")
             print(f"标题：{title}")
             print(f"Hashtag：{tags}")
-            app = XiaoHongShuVideo(title, file, tags, publish_datetimes[index], cookie)
+            # 小红书专属封面和位置都复用主线 uploader 现有能力，桥接层只负责把字段显式透传下去。
+            app = XiaoHongShuVideo(
+                title=title,
+                file_path=file,
+                tags=tags,
+                publish_date=publish_datetimes[index],
+                account_file=cookie,
+                thumbnail_path=thumbnail_path or None,
+                location=location,
+            )
             asyncio.run(app.main(), debug=False)
 
 
@@ -207,6 +269,8 @@ def post_note_DouYin(
     videos_per_day=DEFAULT_VIDEOS_PER_DAY,
     daily_times=None,
     start_days=0,
+    location="",
+    self_declaration="内容为个人观点或见解",
 ):
     """把抖音图文请求分发到图文 uploader。"""
 
@@ -227,6 +291,8 @@ def post_note_DouYin(
             tags=tags,
             publish_date=publish_datetime,
             account_file=str(cookie),
+            location=location,
+            self_declaration=self_declaration,
         )
         asyncio.run(app.douyin_upload_note(), debug=False)
 
@@ -275,6 +341,7 @@ def post_note_xhs(
     videos_per_day=DEFAULT_VIDEOS_PER_DAY,
     daily_times=None,
     start_days=0,
+    location="",
 ):
     """把小红书图文请求分发到图文 uploader。"""
 
@@ -296,5 +363,6 @@ def post_note_xhs(
             tags=tags,
             publish_date=publish_datetime,
             account_file=str(cookie),
+            location=location,
         )
         asyncio.run(app.main(), debug=False)

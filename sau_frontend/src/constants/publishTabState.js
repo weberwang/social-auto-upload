@@ -12,7 +12,9 @@ import {
 const DEFAULT_SELECTED_PLATFORM = 1
 const BILIBILI_PLATFORM_KEY = 5
 const DOUYIN_PLATFORM_KEY = 3
+const KUAISHOU_PLATFORM_KEY = 4
 const TENCENT_PLATFORM_KEY = 2
+const DOUYIN_DEFAULT_SELF_DECLARATION = '内容为个人观点或见解'
 
 /**
  * 深拷贝发布 Tab 状态，避免默认数组、平台字段和复制来源共享引用。
@@ -46,12 +48,22 @@ function createDefaultPlatformFields(overrides = {}) {
   return {
     douyin: {
       productLink: typeof overrides.douyin?.productLink === 'string' ? overrides.douyin.productLink : '',
-      productTitle: typeof overrides.douyin?.productTitle === 'string' ? overrides.douyin.productTitle : ''
+      productTitle: typeof overrides.douyin?.productTitle === 'string' ? overrides.douyin.productTitle : '',
+      location: typeof overrides.douyin?.location === 'string' ? overrides.douyin.location : '',
+      selfDeclaration: typeof overrides.douyin?.selfDeclaration === 'string'
+        ? overrides.douyin.selfDeclaration
+        : DOUYIN_DEFAULT_SELF_DECLARATION,
+      syncToToutiaoXigua: typeof overrides.douyin?.syncToToutiaoXigua === 'boolean'
+        ? overrides.douyin.syncToToutiaoXigua
+        : true
     },
     kuaishou: {
+      thumbnailPath: typeof overrides.kuaishou?.thumbnailPath === 'string' ? overrides.kuaishou.thumbnailPath : '',
       ...(overrides.kuaishou && typeof overrides.kuaishou === 'object' ? overrides.kuaishou : {})
     },
     xiaohongshu: {
+      thumbnailPath: typeof overrides.xiaohongshu?.thumbnailPath === 'string' ? overrides.xiaohongshu.thumbnailPath : '',
+      location: typeof overrides.xiaohongshu?.location === 'string' ? overrides.xiaohongshu.location : '',
       ...(overrides.xiaohongshu && typeof overrides.xiaohongshu === 'object' ? overrides.xiaohongshu : {})
     },
     tencent: {
@@ -61,6 +73,12 @@ function createDefaultPlatformFields(overrides = {}) {
       originalType: typeof overrides.tencent?.originalType === 'string' ? overrides.tencent.originalType : '',
       contentDeclaration: typeof overrides.tencent?.contentDeclaration === 'string' ? overrides.tencent.contentDeclaration : '',
       noteCoverPath: typeof overrides.tencent?.noteCoverPath === 'string' ? overrides.tencent.noteCoverPath : '',
+      thumbnailLandscapePath: typeof overrides.tencent?.thumbnailLandscapePath === 'string'
+        ? overrides.tencent.thumbnailLandscapePath
+        : '',
+      thumbnailPortraitPath: typeof overrides.tencent?.thumbnailPortraitPath === 'string'
+        ? overrides.tencent.thumbnailPortraitPath
+        : '',
       isDraft: Boolean(overrides.tencent?.isDraft)
     },
     bilibili: {
@@ -74,6 +92,19 @@ function createDefaultPlatformFields(overrides = {}) {
  * 根据平台和内容类型选择增强组件名称，避免主页面继续堆平台分支。
  */
 export function getPlatformEnhancementComponentName(platformKey, contentType) {
+  if (platformKey === DOUYIN_PLATFORM_KEY) {
+    return contentType === PUBLISH_CONTENT_TYPE_IMAGE_TEXT
+      ? 'DouyinImageTextEnhancement'
+      : 'DouyinVideoEnhancement'
+  }
+  if (platformKey === KUAISHOU_PLATFORM_KEY && contentType !== PUBLISH_CONTENT_TYPE_IMAGE_TEXT) {
+    return 'KuaishouVideoEnhancement'
+  }
+  if (platformKey === DEFAULT_SELECTED_PLATFORM) {
+    return contentType === PUBLISH_CONTENT_TYPE_IMAGE_TEXT
+      ? 'XiaohongshuImageTextEnhancement'
+      : 'XiaohongshuVideoEnhancement'
+  }
   if (platformKey === TENCENT_PLATFORM_KEY) {
     return contentType === PUBLISH_CONTENT_TYPE_IMAGE_TEXT
       ? 'TencentImageTextEnhancement'
@@ -180,7 +211,33 @@ function resolvePlatformFields(safeTab) {
         : (typeof safeTab.productLink === 'string' ? safeTab.productLink : ''),
       productTitle: typeof platformFields.douyin?.productTitle === 'string'
         ? platformFields.douyin.productTitle
-        : (typeof safeTab.productTitle === 'string' ? safeTab.productTitle : '')
+        : (typeof safeTab.productTitle === 'string' ? safeTab.productTitle : ''),
+      location: typeof platformFields.douyin?.location === 'string'
+        ? platformFields.douyin.location
+        : (typeof safeTab.location === 'string' ? safeTab.location : ''),
+      selfDeclaration: typeof platformFields.douyin?.selfDeclaration === 'string'
+        ? platformFields.douyin.selfDeclaration
+        : (typeof safeTab.selfDeclaration === 'string' && safeTab.selfDeclaration
+          ? safeTab.selfDeclaration
+          : DOUYIN_DEFAULT_SELF_DECLARATION),
+      syncToToutiaoXigua: typeof platformFields.douyin?.syncToToutiaoXigua === 'boolean'
+        ? platformFields.douyin.syncToToutiaoXigua
+        : (typeof safeTab.syncToToutiaoXigua === 'boolean' ? safeTab.syncToToutiaoXigua : true)
+    },
+    kuaishou: {
+      ...(platformFields.kuaishou || {}),
+      thumbnailPath: typeof platformFields.kuaishou?.thumbnailPath === 'string'
+        ? platformFields.kuaishou.thumbnailPath
+        : (typeof safeTab.thumbnailPath === 'string' ? safeTab.thumbnailPath : '')
+    },
+    xiaohongshu: {
+      ...(platformFields.xiaohongshu || {}),
+      thumbnailPath: typeof platformFields.xiaohongshu?.thumbnailPath === 'string'
+        ? platformFields.xiaohongshu.thumbnailPath
+        : (typeof safeTab.xiaohongshuThumbnailPath === 'string' ? safeTab.xiaohongshuThumbnailPath : ''),
+      location: typeof platformFields.xiaohongshu?.location === 'string'
+        ? platformFields.xiaohongshu.location
+        : (typeof safeTab.location === 'string' ? safeTab.location : '')
     },
     tencent: {
       ...(platformFields.tencent || {}),
@@ -202,6 +259,12 @@ function resolvePlatformFields(safeTab) {
       noteCoverPath: typeof platformFields.tencent?.noteCoverPath === 'string'
         ? platformFields.tencent.noteCoverPath
         : (typeof safeTab.noteCoverPath === 'string' ? safeTab.noteCoverPath : ''),
+      thumbnailLandscapePath: typeof platformFields.tencent?.thumbnailLandscapePath === 'string'
+        ? platformFields.tencent.thumbnailLandscapePath
+        : (typeof safeTab.thumbnailLandscapePath === 'string' ? safeTab.thumbnailLandscapePath : ''),
+      thumbnailPortraitPath: typeof platformFields.tencent?.thumbnailPortraitPath === 'string'
+        ? platformFields.tencent.thumbnailPortraitPath
+        : (typeof safeTab.thumbnailPortraitPath === 'string' ? safeTab.thumbnailPortraitPath : ''),
       isDraft: typeof platformFields.tencent?.isDraft === 'boolean'
         ? platformFields.tencent.isDraft
         : Boolean(safeTab.isDraft)
@@ -310,6 +373,12 @@ export function flattenPublishTabState(state) {
     bilibiliTid: normalizedState.platformFields.bilibili.tid,
     productLink: normalizedState.platformFields.douyin.productLink,
     productTitle: normalizedState.platformFields.douyin.productTitle,
+    location: normalizedState.platformFields.douyin.location,
+    selfDeclaration: normalizedState.platformFields.douyin.selfDeclaration,
+    syncToToutiaoXigua: normalizedState.platformFields.douyin.syncToToutiaoXigua,
+    thumbnailPath: normalizedState.platformFields.kuaishou.thumbnailPath,
+    xiaohongshuThumbnailPath: normalizedState.platformFields.xiaohongshu.thumbnailPath,
+    location: normalizedState.platformFields.xiaohongshu.location || normalizedState.platformFields.douyin.location,
     selectedTopics,
     fileList,
     displayFileList,
@@ -325,6 +394,8 @@ export function flattenPublishTabState(state) {
     originalType: normalizedState.platformFields.tencent.originalType,
     contentDeclaration: normalizedState.platformFields.tencent.contentDeclaration,
     noteCoverPath: normalizedState.platformFields.tencent.noteCoverPath,
+    thumbnailLandscapePath: normalizedState.platformFields.tencent.thumbnailLandscapePath,
+    thumbnailPortraitPath: normalizedState.platformFields.tencent.thumbnailPortraitPath,
     isDraft: normalizedState.platformFields.tencent.isDraft,
     isOriginal: normalizedState.status.isOriginal
   }
@@ -378,14 +449,19 @@ export function copyPublishTabToPlatform(sourceTab, targetPlatformKey, nextTabIn
   const contentType = resolveSupportedContentType(selectedPlatform, sourceState.platform.contentType)
   const fileList = filterFilesByContentType(sourceState.materials.fileList, contentType)
   const preservesPlatformFields = sourceState.platform.selectedPlatform === selectedPlatform
-    && contentType !== PUBLISH_CONTENT_TYPE_IMAGE_TEXT
 
   const platformFields = createDefaultPlatformFields()
-  if (preservesPlatformFields && selectedPlatform === BILIBILI_PLATFORM_KEY) {
+  if (preservesPlatformFields && selectedPlatform === BILIBILI_PLATFORM_KEY && contentType !== PUBLISH_CONTENT_TYPE_IMAGE_TEXT) {
     platformFields.bilibili = clonePublishTabState(sourceState.platformFields.bilibili)
   }
   if (preservesPlatformFields && selectedPlatform === DOUYIN_PLATFORM_KEY) {
     platformFields.douyin = clonePublishTabState(sourceState.platformFields.douyin)
+  }
+  if (preservesPlatformFields && selectedPlatform === KUAISHOU_PLATFORM_KEY && contentType !== PUBLISH_CONTENT_TYPE_IMAGE_TEXT) {
+    platformFields.kuaishou = clonePublishTabState(sourceState.platformFields.kuaishou)
+  }
+  if (preservesPlatformFields && selectedPlatform === DEFAULT_SELECTED_PLATFORM) {
+    platformFields.xiaohongshu = clonePublishTabState(sourceState.platformFields.xiaohongshu)
   }
   if (preservesPlatformFields && selectedPlatform === TENCENT_PLATFORM_KEY) {
     platformFields.tencent = clonePublishTabState(sourceState.platformFields.tencent)

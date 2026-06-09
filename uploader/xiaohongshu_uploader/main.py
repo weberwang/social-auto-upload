@@ -435,6 +435,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         publish_date: datetime | int,
         account_file,
         thumbnail_path=None,
+        location: str = "",
         desc: str | None = None,
         publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = DEBUG_MODE,
@@ -451,6 +452,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         self.file_path = file_path
         self.tags = tags or []
         self.thumbnail_path = thumbnail_path
+        self.location = location
         self.desc = desc or ""
 
     async def validate_upload_args(self):
@@ -545,7 +547,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
 
         await self.set_thumbnail(page, self.thumbnail_path)
 
-        # await self.set_location(page, "青岛市")
+        await self.set_location(page, self.location)
 
         if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_xiaohongshu(page, self.publish_date)
@@ -606,6 +608,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         account_file,
         title: str | None = None,
         desc: str | None = None,
+        location: str = "",
         publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = DEBUG_MODE,
         headless: bool = LOCAL_CHROME_HEADLESS,
@@ -622,6 +625,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         self.tags = tags or []
         self.desc = desc if desc is not None else self.note
         self.title = title or ((self.desc or self.note)[:20] if (self.desc or self.note) else "")
+        self.location = location
 
     async def validate_upload_args(self):
         await self.validate_base_args()
@@ -664,6 +668,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
 
         xiaohongshu_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
         await self.fill_meta(page)
+        await self.set_location(page, self.location)
 
         if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_xiaohongshu(page, self.publish_date)

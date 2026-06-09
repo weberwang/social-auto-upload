@@ -822,7 +822,12 @@ class TencentBaseUploader(BaseVideoUploader):
         try:
             if await content_declaration.count() and await content_declaration.is_visible():
                 await content_declaration.click()
-                for option_text in ("无需声明", "不声明", "无"):
+                requested_option_texts = []
+                if getattr(self, "content_declaration", ""):
+                    requested_option_texts.append(getattr(self, "content_declaration"))
+                requested_option_texts.extend(["无需声明", "不声明", "无"])
+
+                for option_text in requested_option_texts:
                     option = page.locator(f'text="{option_text}"').first
                     if await option.count() and await option.is_visible():
                         await option.click()
@@ -933,6 +938,10 @@ class TencentVideo(TencentBaseUploader):
         self.thumbnail_landscape_path = thumbnail_landscape_path
         self.thumbnail_portrait_path = thumbnail_portrait_path or thumbnail_path
         self.short_title = short_title
+        self.collection_name = ""
+        self.declare_original = False
+        self.original_type = ""
+        self.content_declaration = ""
 
     async def validate_upload_args(self):
         await self.validate_base_args()
@@ -1057,7 +1066,10 @@ class TencentVideo(TencentBaseUploader):
     async def prepare_video_for_publish(self, page: Page) -> None:
         await self.fill_title_and_tags(page)
         await self.fill_description(page)
-        await self.apply_collection(page)
+        if self.collection_name:
+            await apply_tencent_named_collection(page, self.collection_name)
+        else:
+            await self.apply_collection(page)
 
     async def upload(self, playwright: Playwright) -> None:
         tencent_logger.info(_msg("🧍", "小人先检查 cookie、视频文件和发布时间"))
@@ -1075,6 +1087,8 @@ class TencentVideo(TencentBaseUploader):
             await self.upload_video_file(page, self.file_path)
             await self.prepare_video_for_publish(page)
             await self.wait_for_upload_complete(page)
+            if self.declare_original:
+                self.category = self.original_type or self.category
             await self.apply_original_statement(page)
             await self.set_thumbnail(page)
 

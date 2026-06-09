@@ -176,26 +176,6 @@
             />
           </div>
 
-          <div v-if="tab.selectedPlatform === 3 && !isImageTextTab(tab)" class="product-section">
-            <h3>商品链接</h3>
-            <el-input
-              v-model="tab.productTitle"
-              type="text"
-              :rows="1"
-              placeholder="请输入商品名称"
-              maxlength="200"
-              class="product-name-input"
-            />
-            <el-input
-              v-model="tab.productLink"
-              type="text"
-              :rows="1"
-              placeholder="请输入商品链接"
-              maxlength="200"
-              class="product-link-input"
-            />
-          </div>
-
           <PlatformEnhancementHost :tab="tab" />
 
           <BaseVideoFields

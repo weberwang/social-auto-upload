@@ -52,7 +52,17 @@ class WebPublishRequest:
     start_days: int | None
     product_link: str
     product_title: str
+    location: str
+    self_declaration: str
+    sync_to_toutiao_xigua: bool
     thumbnail_path: str
+    thumbnail_landscape_path: str
+    thumbnail_portrait_path: str
+    short_title: str
+    collection_name: str
+    declare_original: bool
+    original_type: str
+    content_declaration: str
     is_draft: bool
     platform_fields: dict[str, object]
 
@@ -97,6 +107,26 @@ def _get_int(payload: dict[str, object], key: str) -> int | None:
         return int(raw_value)
     except (TypeError, ValueError) as exc:
         raise PublishRequestError(f"{key} 必须是整数") from exc
+
+
+def _get_bool(payload: dict[str, object], key: str, default: bool = False) -> bool:
+    """统一解析布尔字段，兼容布尔、数字和常见字符串表达。"""
+
+    raw_value = payload.get(key, default)
+    match raw_value:
+        case bool() as bool_value:
+            return bool_value
+        case int() as int_value:
+            return int_value != 0
+        case str() as text_value:
+            normalized_value = text_value.strip().lower()
+            if normalized_value in {"", "0", "false", "no", "off"}:
+                return False
+            if normalized_value in {"1", "true", "yes", "on"}:
+                return True
+            return bool(normalized_value)
+        case _:
+            return bool(raw_value)
 
 
 def _get_content_type(payload: dict[str, object]) -> ContentType:
@@ -144,6 +174,8 @@ def parse_web_publish_request(payload: object) -> WebPublishRequest:
     base_fields = _get_object(request_payload, "baseFields")
     platform_fields = _get_object(request_payload, "platformFields")
     douyin_platform_fields = platform_fields.get("douyin")
+    kuaishou_platform_fields = platform_fields.get("kuaishou")
+    xiaohongshu_platform_fields = platform_fields.get("xiaohongshu")
     bilibili_platform_fields = platform_fields.get("bilibili")
     tencent_platform_fields = platform_fields.get("tencent")
     platform_type = _get_int(request_payload, "type")
@@ -159,6 +191,12 @@ def parse_web_publish_request(payload: object) -> WebPublishRequest:
 
     content_type = _get_content_type(request_payload)
     description = _get_string(field_source, "description")
+    if platform_type == 5 and content_type == VIDEO_CONTENT_TYPE:
+        # B站简介已经迁移到平台专属字段；这里只在旧请求仍走通用 description 时保留兜底回退。
+        description = _get_string(
+            bilibili_platform_fields if isinstance(bilibili_platform_fields, dict) else {},
+            "description",
+        ) or description
     note_content = _get_string(field_source, "noteContent")
     if content_type == IMAGE_TEXT_CONTENT_TYPE and not note_content:
         # 兼容旧字段，避免前端切换过程中短时间内仍传 description。
@@ -192,7 +230,57 @@ def parse_web_publish_request(payload: object) -> WebPublishRequest:
             douyin_platform_fields if isinstance(douyin_platform_fields, dict) else request_payload,
             "productTitle",
         ),
-        thumbnail_path=_get_string(request_payload, "thumbnail"),
+        location=_get_string(
+            douyin_platform_fields if isinstance(douyin_platform_fields, dict) else (
+                xiaohongshu_platform_fields if isinstance(xiaohongshu_platform_fields, dict) else request_payload
+            ),
+            "location",
+        ),
+        self_declaration=_get_string(
+            douyin_platform_fields if isinstance(douyin_platform_fields, dict) else request_payload,
+            "selfDeclaration",
+            "内容为个人观点或见解",
+        ),
+        sync_to_toutiao_xigua=_get_bool(
+            douyin_platform_fields if isinstance(douyin_platform_fields, dict) else request_payload,
+            "syncToToutiaoXigua",
+            True,
+        ),
+        thumbnail_path=_get_string(
+            kuaishou_platform_fields if isinstance(kuaishou_platform_fields, dict) else (
+                xiaohongshu_platform_fields if isinstance(xiaohongshu_platform_fields, dict) else request_payload
+            ),
+            "thumbnailPath",
+        ) or _get_string(request_payload, "thumbnail"),
+        thumbnail_landscape_path=_get_string(
+            tencent_platform_fields if isinstance(tencent_platform_fields, dict) else request_payload,
+            "thumbnailLandscapePath",
+        ),
+        thumbnail_portrait_path=_get_string(
+            tencent_platform_fields if isinstance(tencent_platform_fields, dict) else request_payload,
+            "thumbnailPortraitPath",
+        ),
+        short_title=_get_string(
+            tencent_platform_fields if isinstance(tencent_platform_fields, dict) else request_payload,
+            "shortTitle",
+        ),
+        collection_name=_get_string(
+            tencent_platform_fields if isinstance(tencent_platform_fields, dict) else request_payload,
+            "collectionName",
+        ),
+        declare_original=_get_bool(
+            tencent_platform_fields if isinstance(tencent_platform_fields, dict) else request_payload,
+            "declareOriginal",
+            False,
+        ),
+        original_type=_get_string(
+            tencent_platform_fields if isinstance(tencent_platform_fields, dict) else request_payload,
+            "originalType",
+        ),
+        content_declaration=_get_string(
+            tencent_platform_fields if isinstance(tencent_platform_fields, dict) else request_payload,
+            "contentDeclaration",
+        ),
         is_draft=bool(
             tencent_platform_fields.get("isDraft")
             if isinstance(tencent_platform_fields, dict) and "isDraft" in tencent_platform_fields
@@ -241,6 +329,8 @@ def dispatch_video_request(publish_request: WebPublishRequest) -> None:
                 publish_request.videos_per_day,
                 list(publish_request.daily_times),
                 publish_request.start_days,
+                publish_request.thumbnail_path,
+                publish_request.location,
             )
         case 2:
             post_video_tencent(
@@ -254,6 +344,14 @@ def dispatch_video_request(publish_request: WebPublishRequest) -> None:
                 list(publish_request.daily_times),
                 publish_request.start_days,
                 publish_request.is_draft,
+                publish_request.thumbnail_path,
+                publish_request.thumbnail_landscape_path,
+                publish_request.thumbnail_portrait_path,
+                publish_request.short_title,
+                publish_request.collection_name,
+                publish_request.declare_original,
+                publish_request.original_type,
+                publish_request.content_declaration,
             )
         case 3:
             post_video_DouYin(
@@ -269,6 +367,9 @@ def dispatch_video_request(publish_request: WebPublishRequest) -> None:
                 publish_request.thumbnail_path,
                 publish_request.product_link,
                 publish_request.product_title,
+                publish_request.location,
+                publish_request.self_declaration,
+                publish_request.sync_to_toutiao_xigua,
             )
         case 4:
             post_video_ks(
@@ -281,6 +382,7 @@ def dispatch_video_request(publish_request: WebPublishRequest) -> None:
                 publish_request.videos_per_day,
                 list(publish_request.daily_times),
                 publish_request.start_days,
+                publish_request.thumbnail_path,
             )
         case 5:
             post_video_bilibili(
@@ -312,6 +414,7 @@ def dispatch_image_text_request(publish_request: WebPublishRequest) -> None:
                 publish_request.videos_per_day,
                 list(publish_request.daily_times),
                 publish_request.start_days,
+                publish_request.location,
             )
         case 3:
             post_note_DouYin(
@@ -324,6 +427,8 @@ def dispatch_image_text_request(publish_request: WebPublishRequest) -> None:
                 publish_request.videos_per_day,
                 list(publish_request.daily_times),
                 publish_request.start_days,
+                publish_request.location,
+                publish_request.self_declaration,
             )
         case 4:
             post_note_ks(

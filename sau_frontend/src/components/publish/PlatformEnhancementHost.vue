@@ -1,11 +1,44 @@
 <template>
+  <DouyinVideoEnhancement
+    v-if="componentName === 'DouyinVideoEnhancement'"
+    v-model:product-title="tab.productTitle"
+    v-model:product-link="tab.productLink"
+    v-model:location="tab.location"
+    v-model:self-declaration="tab.selfDeclaration"
+    v-model:sync-to-toutiao-xigua="tab.syncToToutiaoXigua"
+  />
+
+  <DouyinImageTextEnhancement
+    v-else-if="componentName === 'DouyinImageTextEnhancement'"
+    v-model:location="tab.location"
+    v-model:self-declaration="tab.selfDeclaration"
+  />
+
+  <KuaishouVideoEnhancement
+    v-else-if="componentName === 'KuaishouVideoEnhancement'"
+    v-model:thumbnail-path="tab.thumbnailPath"
+  />
+
+  <XiaohongshuVideoEnhancement
+    v-else-if="componentName === 'XiaohongshuVideoEnhancement'"
+    v-model:thumbnail-path="tab.xiaohongshuThumbnailPath"
+    v-model:location="tab.location"
+  />
+
+  <XiaohongshuImageTextEnhancement
+    v-else-if="componentName === 'XiaohongshuImageTextEnhancement'"
+    v-model:location="tab.location"
+  />
+
   <TencentVideoEnhancement
-    v-if="componentName === 'TencentVideoEnhancement'"
+    v-else-if="componentName === 'TencentVideoEnhancement'"
     v-model:short-title="tab.shortTitle"
     v-model:collection-name="tab.collectionName"
     v-model:declare-original="tab.declareOriginal"
     v-model:original-type="tab.originalType"
     v-model:content-declaration="tab.contentDeclaration"
+    v-model:thumbnail-landscape-path="tab.thumbnailLandscapePath"
+    v-model:thumbnail-portrait-path="tab.thumbnailPortraitPath"
     v-model:is-draft="tab.isDraft"
   />
 
@@ -29,8 +62,13 @@
 import { computed } from 'vue'
 
 import BilibiliPublishFields from '@/components/BilibiliPublishFields.vue'
+import DouyinImageTextEnhancement from '@/components/publish/DouyinImageTextEnhancement.vue'
+import DouyinVideoEnhancement from '@/components/publish/DouyinVideoEnhancement.vue'
+import KuaishouVideoEnhancement from '@/components/publish/KuaishouVideoEnhancement.vue'
 import TencentImageTextEnhancement from '@/components/publish/TencentImageTextEnhancement.vue'
 import TencentVideoEnhancement from '@/components/publish/TencentVideoEnhancement.vue'
+import XiaohongshuImageTextEnhancement from '@/components/publish/XiaohongshuImageTextEnhancement.vue'
+import XiaohongshuVideoEnhancement from '@/components/publish/XiaohongshuVideoEnhancement.vue'
 import { getPlatformEnhancementComponentName } from '@/constants/publishTabState.js'
 
 /**

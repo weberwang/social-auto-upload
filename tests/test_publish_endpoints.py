@@ -93,6 +93,231 @@ class PublishEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["code"], 200)
         mock_post_video.assert_called_once()
+        self.assertEqual(
+            mock_post_video.call_args.args,
+            (
+                "视频标题",
+                ["video-a.mp4"],
+                ["旅行"],
+                ["tencent_creator.json"],
+                None,
+                1,
+                1,
+                ["10:00"],
+                0,
+                True,
+                "",
+                "",
+                "",
+                "",
+                "旅行合集",
+                True,
+                "生活",
+                "无需声明",
+            ),
+        )
+
+    def test_post_video_accepts_xiaohongshu_video_platform_fields(self):
+        """小红书视频增强字段应透传到历史发布入口，避免封面和位置在旧接口层丢失。"""
+
+        payload = {
+            "type": 1,
+            "contentType": "video",
+            "baseFields": {
+                "title": "小红书视频标题",
+                "description": "小红书视频简介",
+                "tags": ["探店"],
+                "enableTimer": 0,
+                "videosPerDay": 1,
+                "dailyTimes": ["10:00"],
+                "startDays": 0,
+            },
+            "platformFields": {
+                "xiaohongshu": {
+                    "thumbnailPath": "cover.png",
+                    "location": "上海市",
+                }
+            },
+            "fileList": ["video-a.mp4"],
+            "accountList": ["xiaohongshu_creator.json"],
+        }
+
+        with patch("myUtils.web_publish.post_video_xhs") as mock_post_video:
+            response = self.client.post("/postVideo", json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["code"], 200)
+        mock_post_video.assert_called_once()
+        self.assertEqual(
+            mock_post_video.call_args.args,
+            (
+                "小红书视频标题",
+                ["video-a.mp4"],
+                ["探店"],
+                ["xiaohongshu_creator.json"],
+                None,
+                0,
+                1,
+                ["10:00"],
+                0,
+                "cover.png",
+                "上海市",
+            ),
+        )
+
+    def test_post_video_accepts_bilibili_video_platform_fields(self):
+        """B站视频增强字段应透传到历史发布入口，避免结构化 payload 丢失简介和分区。"""
+
+        payload = {
+            "type": 5,
+            "contentType": "video",
+            "baseFields": {
+                "title": "B站视频标题",
+                "description": "",
+                "tags": ["测评"],
+                "enableTimer": 1,
+                "videosPerDay": 2,
+                "dailyTimes": ["10:00", "18:00"],
+                "startDays": 1,
+            },
+            "platformFields": {
+                "bilibili": {
+                    "description": "B站视频简介",
+                    "tid": 17,
+                }
+            },
+            "fileList": ["video-a.mp4"],
+            "accountList": ["bilibili_creator.json"],
+        }
+
+        with patch("myUtils.web_publish.post_video_bilibili") as mock_post_video:
+            response = self.client.post("/postVideo", json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["code"], 200)
+        mock_post_video.assert_called_once()
+        self.assertEqual(
+            mock_post_video.call_args.args,
+            (
+                "B站视频标题",
+                ["video-a.mp4"],
+                ["测评"],
+                ["bilibili_creator.json"],
+                17,
+            ),
+        )
+        self.assertEqual(
+            mock_post_video.call_args.kwargs,
+            {
+                "description": "B站视频简介",
+                "enableTimer": 1,
+                "videos_per_day": 2,
+                "daily_times": ["10:00", "18:00"],
+                "start_days": 1,
+            },
+        )
+
+
+    def test_post_video_accepts_douyin_video_platform_fields(self):
+        """抖音视频增强字段应透传到历史发布入口，避免新增字段在旧接口层丢失。"""
+
+        payload = {
+            "type": 3,
+            "contentType": "video",
+            "baseFields": {
+                "title": "视频标题",
+                "description": "视频简介",
+                "tags": ["探店"],
+                "enableTimer": 0,
+                "videosPerDay": 1,
+                "dailyTimes": ["10:00"],
+                "startDays": 0,
+            },
+            "platformFields": {
+                "douyin": {
+                    "productTitle": "示例商品",
+                    "productLink": "https://example.com/item",
+                    "location": "上海市",
+                    "selfDeclaration": "内容为个人观点或见解",
+                    "syncToToutiaoXigua": False,
+                }
+            },
+            "fileList": ["video-a.mp4"],
+            "accountList": ["douyin_creator.json"],
+        }
+
+        with patch("myUtils.web_publish.post_video_DouYin") as mock_post_video:
+            response = self.client.post("/postVideo", json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["code"], 200)
+        mock_post_video.assert_called_once()
+        self.assertEqual(
+            mock_post_video.call_args.args,
+            (
+                "视频标题",
+                ["video-a.mp4"],
+                ["探店"],
+                ["douyin_creator.json"],
+                None,
+                0,
+                1,
+                ["10:00"],
+                0,
+                "",
+                "https://example.com/item",
+                "示例商品",
+                "上海市",
+                "内容为个人观点或见解",
+                False,
+            ),
+        )
+
+    def test_post_video_accepts_kuaishou_video_platform_fields(self):
+        """快手视频增强字段应透传到历史发布入口，避免自定义封面在旧接口层丢失。"""
+
+        payload = {
+            "type": 4,
+            "contentType": "video",
+            "baseFields": {
+                "title": "快手视频标题",
+                "description": "快手视频简介",
+                "tags": ["探店"],
+                "enableTimer": 0,
+                "videosPerDay": 1,
+                "dailyTimes": ["10:00"],
+                "startDays": 0,
+            },
+            "platformFields": {
+                "kuaishou": {
+                    "thumbnailPath": "cover.png",
+                }
+            },
+            "fileList": ["video-a.mp4"],
+            "accountList": ["kuaishou_creator.json"],
+        }
+
+        with patch("myUtils.web_publish.post_video_ks") as mock_post_video:
+            response = self.client.post("/postVideo", json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["code"], 200)
+        mock_post_video.assert_called_once()
+        self.assertEqual(
+            mock_post_video.call_args.args,
+            (
+                "快手视频标题",
+                ["video-a.mp4"],
+                ["探店"],
+                ["kuaishou_creator.json"],
+                None,
+                0,
+                1,
+                ["10:00"],
+                0,
+                "cover.png",
+            ),
+        )
 
 
 if __name__ == "__main__":

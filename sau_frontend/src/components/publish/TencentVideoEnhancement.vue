@@ -29,6 +29,20 @@
       placeholder="请输入内容声明"
       class="tencent-content-declaration-input"
     />
+    <el-input
+      v-model="thumbnailLandscapePathModel"
+      type="text"
+      maxlength="500"
+      placeholder="请输入 4:3 横版封面路径（可选）"
+      class="tencent-thumbnail-landscape-input"
+    />
+    <el-input
+      v-model="thumbnailPortraitPathModel"
+      type="text"
+      maxlength="500"
+      placeholder="请输入 3:4 竖版封面路径（可选）"
+      class="tencent-thumbnail-portrait-input"
+    />
     <el-checkbox v-model="declareOriginalModel" label="声明原创" />
     <el-checkbox v-model="isDraftModel" label="仅保存草稿(用手机发布)" />
   </div>
@@ -61,6 +75,14 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  thumbnailLandscapePath: {
+    type: String,
+    default: ''
+  },
+  thumbnailPortraitPath: {
+    type: String,
+    default: ''
+  },
   isDraft: {
     type: Boolean,
     default: false
@@ -73,6 +95,8 @@ const emit = defineEmits([
   'update:declareOriginal',
   'update:originalType',
   'update:contentDeclaration',
+  'update:thumbnailLandscapePath',
+  'update:thumbnailPortraitPath',
   'update:isDraft'
 ])
 
@@ -102,6 +126,19 @@ const originalTypeModel = computed({
 const contentDeclarationModel = computed({
   get: () => props.contentDeclaration,
   set: (value) => emit('update:contentDeclaration', value)
+})
+
+/**
+ * 视频号视频支持双比例封面，这里分别暴露横版和竖版路径，避免继续挤进通用字段造成平台歧义。
+ */
+const thumbnailLandscapePathModel = computed({
+  get: () => props.thumbnailLandscapePath,
+  set: (value) => emit('update:thumbnailLandscapePath', value)
+})
+
+const thumbnailPortraitPathModel = computed({
+  get: () => props.thumbnailPortraitPath,
+  set: (value) => emit('update:thumbnailPortraitPath', value)
 })
 
 const isDraftModel = computed({

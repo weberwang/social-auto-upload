@@ -24,6 +24,7 @@ DOUYIN_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 DOUYIN_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 DOUYIN_HOME_URL = "https://creator.douyin.com/creator-micro/home"
 DOUYIN_UPLOAD_URL = "https://creator.douyin.com/creator-micro/content/upload"
+DOUYIN_DEFAULT_SELF_DECLARATION = "内容为个人观点或见解"
 
 
 def _msg(emoji: str, text: str) -> str:
@@ -302,12 +303,26 @@ class DouYinBaseUploader(BaseVideoUploader):
     async def set_location(self, page: Page, location: str = ""):
         if not location:
             return
-        await page.locator('div.semi-select span:has-text("输入地理位置")').click()
-        await page.keyboard.press("Backspace")
-        await page.wait_for_timeout(2000)
-        await page.keyboard.type(location)
-        await page.wait_for_selector('div[role="listbox"] [role="option"]', timeout=5000)
-        await page.locator('div[role="listbox"] [role="option"]').first.click()
+        try:
+            location_entry = page.locator(
+                'div.semi-select span:has-text("输入地理位置"), '
+                'div.semi-select span:has-text("添加位置"), '
+                'div.semi-select span:has-text("设置位置")'
+            ).first
+            if not await location_entry.count():
+                douyin_logger.warning(_msg("📍", f"页面上没找到位置入口，跳过位置设置：{location}"))
+                return
+
+            await location_entry.click()
+            await page.keyboard.press("Backspace")
+            await page.wait_for_timeout(1000)
+            await page.keyboard.type(location)
+            await page.wait_for_selector('div[role="listbox"] [role="option"]', timeout=5000)
+            await page.locator('div[role="listbox"] [role="option"]').first.click()
+            douyin_logger.info(_msg("📍", f"位置已经设置成 {location}"))
+        except Exception as exc:
+            # 位置是可选增强字段，页面结构变化时记录告警并继续，避免阻断正常发布。
+            douyin_logger.warning(_msg("📍", f"位置设置失败，跳过并继续发布：{exc}"))
 
     async def handle_product_dialog(self, page: Page, product_title: str):
         await page.wait_for_timeout(2000)
@@ -382,12 +397,15 @@ class DouYinBaseUploader(BaseVideoUploader):
             douyin_logger.error(_msg("😢", f"设置商品链接时出错: {str(e)}"))
             return False
 
-    async def set_self_declaration(self, page: Page, declaration: str = "内容为个人观点或见解") -> None:
+    async def set_self_declaration(self, page: Page, declaration: str = DOUYIN_DEFAULT_SELF_DECLARATION) -> None:
         """抖音「自主声明」为发布必选项：打开声明弹窗 → 选指定类型 → 确定。
 
         入口和弹窗都是异步渲染，等不到就记 warning 跳过、继续发布，绝不因此中断
         （与小红书话题、视频号声明原创的容错策略保持一致）。
         """
+        if not declaration.strip():
+            douyin_logger.warning(_msg("🧾", "自主声明为空，跳过该步骤继续发布"))
+            return
         try:
             # 发布页底部「自主声明」行，未选时显示占位文案「请选择自主声明」
             entry = page.get_by_text("请选择自主声明").first
@@ -425,6 +443,9 @@ class DouYinVideo(DouYinBaseUploader):
         productTitle="",
         thumbnail_portrait_path=None,
         desc: str | None = None,
+        location: str = "",
+        self_declaration: str = DOUYIN_DEFAULT_SELF_DECLARATION,
+        sync_to_toutiao_xigua: bool = True,
         publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = DEBUG_MODE,
         headless: bool = LOCAL_CHROME_HEADLESS,
@@ -444,6 +465,9 @@ class DouYinVideo(DouYinBaseUploader):
         self.productLink = productLink
         self.productTitle = productTitle
         self.desc = desc or ""
+        self.location = location
+        self.self_declaration = self_declaration
+        self.sync_to_toutiao_xigua = sync_to_toutiao_xigua
 
     async def validate_upload_args(self):
         await self.validate_base_args()
@@ -576,10 +600,11 @@ class DouYinVideo(DouYinBaseUploader):
 
         await self.set_thumbnail(page)
 
-        await self.set_self_declaration(page)
+        await self.set_location(page, self.location)
+        await self.set_self_declaration(page, self.self_declaration)
 
         third_part_element = '[class^="info"] > [class^="first-part"] div div.semi-switch'
-        if await page.locator(third_part_element).count():
+        if self.sync_to_toutiao_xigua and await page.locator(third_part_element).count():
             if "semi-switch-checked" not in await page.eval_on_selector(third_part_element, "div => div.className"):
                 await page.locator(third_part_element).locator("input.semi-switch-native-control").click()
 
@@ -627,6 +652,8 @@ class DouYinNote(DouYinBaseUploader):
         publish_date: datetime | int,
         account_file,
         title: str | None = None,
+        location: str = "",
+        self_declaration: str = DOUYIN_DEFAULT_SELF_DECLARATION,
         publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = DEBUG_MODE,
         headless: bool = LOCAL_CHROME_HEADLESS,
@@ -642,6 +669,8 @@ class DouYinNote(DouYinBaseUploader):
         self.note = note or ""
         self.title = title or (self.note[:30] if self.note else "")
         self.tags = tags or []
+        self.location = location
+        self.self_declaration = self_declaration
 
     async def validate_upload_args(self):
         await self.validate_base_args()
@@ -686,6 +715,8 @@ class DouYinNote(DouYinBaseUploader):
         douyin_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
         await self.fill_title_and_description(page, self.title, self.note, self.tags)
         douyin_logger.info(_msg("🏷️", f"小人一共贴了 {len(self.tags)} 个话题"))
+        await self.set_location(page, self.location)
+        await self.set_self_declaration(page, self.self_declaration)
 
         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_douyin(page, self.publish_date)
