@@ -85,3 +85,43 @@ test('多账号发布时 payload 应映射全部账号文件与账号名称', ()
   assert.deepEqual(payload.accountList, ['douyin_creator_1.json', 'douyin_creator_2.json'])
   assert.deepEqual(payload.accountNameList, ['抖音主号', '抖音备用号'])
 })
+
+test('微信公众号图文 payload 应保留图文内容并映射公众号账号文件', () => {
+  const tab = flattenPublishTabState(createDefaultPublishTabState({
+    platform: {
+      selectedPlatform: 6,
+      contentType: 'image_text'
+    },
+    materials: {
+      fileList: [
+        {
+          name: 'cover.png',
+          path: '/media/cover.png'
+        },
+        {
+          name: 'detail-1.png',
+          path: '/media/detail-1.png'
+        }
+      ]
+    },
+    accounts: {
+      selectedAccountIds: ['acct-1']
+    },
+    baseFields: {
+      title: '公众号图文标题',
+      noteContent: '公众号图文正文',
+      topics: ['公众号', '测试']
+    }
+  }))
+  const payload = buildPublishPayloadFromState(tab, [
+    { id: 'acct-1', filePath: 'wechatmp_creator.json', name: '微信公众号账号' }
+  ])
+
+  assert.equal(payload.type, 6)
+  assert.equal(payload.contentType, 'image_text')
+  assert.equal(payload.baseFields.title, '公众号图文标题')
+  assert.equal(payload.baseFields.noteContent, '公众号图文正文')
+  assert.deepEqual(payload.baseFields.tags, ['公众号', '测试'])
+  assert.deepEqual(payload.fileList, ['/media/cover.png', '/media/detail-1.png'])
+  assert.deepEqual(payload.accountList, ['wechatmp_creator.json'])
+})

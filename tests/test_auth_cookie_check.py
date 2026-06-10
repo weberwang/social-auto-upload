@@ -104,6 +104,21 @@ class CheckCookieTests(unittest.TestCase):
         called_account_file = mock_check.await_args.args[0]
         self.assertTrue(str(called_account_file).endswith("cookiesFile\\douyin_creator.json"))
 
+    def test_check_cookie_dispatches_wechatmp_to_mainline_validator(self):
+        """微信公众号账号校验应复用主线校验器，避免账号列表和登录流程出现判定漂移。"""
+
+        with patch.object(
+            self.auth,
+            "mainline_wechatmp_cookie_auth",
+            new=AsyncMock(return_value=True),
+        ) as mock_check:
+            result = asyncio.run(self.auth.check_cookie(6, "wechatmp_creator.json"))
+
+        self.assertTrue(result)
+        mock_check.assert_awaited_once()
+        called_account_file = mock_check.await_args.args[0]
+        self.assertTrue(str(called_account_file).endswith("cookiesFile\\wechatmp_creator.json"))
+
 
 if __name__ == "__main__":
     unittest.main()

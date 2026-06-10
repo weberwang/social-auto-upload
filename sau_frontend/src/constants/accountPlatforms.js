@@ -7,7 +7,8 @@ export const ACCOUNT_PLATFORM_LABEL_BY_TYPE = {
   2: '视频号',
   3: '抖音',
   4: '快手',
-  5: 'B站'
+  5: 'B站',
+  6: '微信公众号'
 }
 
 /**
@@ -18,7 +19,8 @@ export const ACCOUNT_PLATFORM_LABELS = [
   '抖音',
   '视频号',
   '小红书',
-  'B站'
+  'B站',
+  '微信公众号'
 ]
 
 /**
@@ -29,7 +31,8 @@ export const ACCOUNT_PLATFORM_TYPE_BY_LABEL = {
   视频号: 2,
   抖音: 3,
   快手: 4,
-  B站: 5
+  B站: 5,
+  微信公众号: 6
 }
 
 /**
@@ -40,7 +43,8 @@ export const ACCOUNT_PLATFORM_TAG_TYPE_MAP = {
   抖音: 'danger',
   视频号: 'warning',
   小红书: 'info',
-  B站: 'primary'
+  B站: 'primary',
+  微信公众号: 'success'
 }
 
 /**
@@ -51,5 +55,6 @@ export const ACCOUNT_PLATFORM_SSE_LOGIN_SUPPORTED_LABELS = new Set([
   '视频号',
   '抖音',
   '快手',
-  'B站'
+  'B站',
+  '微信公众号'
 ])

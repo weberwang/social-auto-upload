@@ -7,6 +7,7 @@ cd /d "%~dp0"
 set "ROOT_DIR=%CD%"
 set "PYTHON_EXE="
 set "PYTHON_SOURCE="
+set "PYTHON_ENV_FILE=%TEMP%\sau-python-env-%RANDOM%-%RANDOM%.cmd"
 set "VENV_PYTHON_EXE=%ROOT_DIR%\.venv\Scripts\python.exe"
 set "BACKEND_ENTRY=%ROOT_DIR%\sau_backend.py"
 set "BACKEND_DEPENDENCY_CHECK=%ROOT_DIR%\scripts\check_backend_dependencies.py"
@@ -55,7 +56,7 @@ if not exist "%BACKEND_CONF%" (
         goto :fail
     )
 
-    REM 启动脚本自动补一份默认配置，避免首次启动时因为缺少 conf.py 直接崩溃。
+    REM Create a default backend config on first run so startup does not fail on missing conf.py.
     echo [preflight] Missing conf.py, creating it from conf.example.py...
     copy /Y "%BACKEND_CONF_TEMPLATE%" "%BACKEND_CONF%" >nul
     if errorlevel 1 (
@@ -95,9 +96,32 @@ if errorlevel 1 (
     goto :fail
 )
 
-for /f "usebackq delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%PYTHON_BOOTSTRAP_SCRIPT%" -VenvPythonExe "%VENV_PYTHON_EXE%" -PyprojectFile "%PYPROJECT_FILE%" -UvLockFile "%UV_LOCK_FILE%" -RequirementsFile "%REQUIREMENTS_FILE%" -DependencyCheckScript "%BACKEND_DEPENDENCY_CHECK%"`) do %%I
+if exist "%PYTHON_ENV_FILE%" del /f /q "%PYTHON_ENV_FILE%" >nul 2>nul
+
+REM Import PowerShell results through a temporary env file so stderr text is never executed as batch commands.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PYTHON_BOOTSTRAP_SCRIPT%" -VenvPythonExe "%VENV_PYTHON_EXE%" -PyprojectFile "%PYPROJECT_FILE%" -UvLockFile "%UV_LOCK_FILE%" -RequirementsFile "%REQUIREMENTS_FILE%" -DependencyCheckScript "%BACKEND_DEPENDENCY_CHECK%" -EnvOutputFile "%PYTHON_ENV_FILE%"
 if errorlevel 1 (
+    if exist "%PYTHON_ENV_FILE%" del /f /q "%PYTHON_ENV_FILE%" >nul 2>nul
     echo [ERROR] Failed to prepare backend Python environment.
+    goto :fail
+)
+
+if not exist "%PYTHON_ENV_FILE%" (
+    echo [ERROR] Python bootstrap did not produce env file: %PYTHON_ENV_FILE%
+    goto :fail
+)
+
+call "%PYTHON_ENV_FILE%"
+if errorlevel 1 (
+    del /f /q "%PYTHON_ENV_FILE%" >nul 2>nul
+    echo [ERROR] Failed to import backend Python environment.
+    goto :fail
+)
+
+del /f /q "%PYTHON_ENV_FILE%" >nul 2>nul
+
+if not defined PYTHON_EXE (
+    echo [ERROR] Python bootstrap did not set PYTHON_EXE.
     goto :fail
 )
 

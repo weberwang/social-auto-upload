@@ -56,6 +56,9 @@
                 <el-tooltip content="B站账号" placement="top">
                   <el-tag size="small" :type="ACCOUNT_PLATFORM_TAG_TYPE_MAP['B站']">{{ platformStats.bilibili }}</el-tag>
                 </el-tooltip>
+                <el-tooltip content="微信公众号账号" placement="top">
+                  <el-tag size="small" :type="ACCOUNT_PLATFORM_TAG_TYPE_MAP['微信公众号']">{{ platformStats.wechatmp }}</el-tag>
+                </el-tooltip>
               </div>
             </div>
           </el-card>
@@ -209,8 +212,9 @@ const platformStats = computed(() => {
   const channels = accounts.filter(a => a.platform === '视频号').length
   const xiaohongshu = accounts.filter(a => a.platform === '小红书').length
   const bilibili = accounts.filter(a => a.platform === 'B站').length
-  const total = [kuaishou, douyin, channels, xiaohongshu, bilibili].filter(n => n > 0).length
-  return { total, kuaishou, douyin, channels, xiaohongshu, bilibili }
+  const wechatmp = accounts.filter(a => a.platform === '微信公众号').length
+  const total = [kuaishou, douyin, channels, xiaohongshu, bilibili, wechatmp].filter(n => n > 0).length
+  return { total, kuaishou, douyin, channels, xiaohongshu, bilibili, wechatmp }
 })
 
 const contentStats = computed(() => {

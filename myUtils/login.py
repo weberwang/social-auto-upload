@@ -14,6 +14,7 @@ from myUtils.auth import check_cookie
 from myUtils.bilibili_web_bridge import build_biliup_account_payload
 from uploader.douyin_uploader.main import douyin_cookie_gen as mainline_douyin_cookie_gen
 from uploader.tencent_uploader.main import get_tencent_cookie as mainline_tencent_cookie_gen
+from uploader.wechatmp_uploader.main import get_wechatmp_cookie as mainline_wechatmp_cookie_gen
 from utils.base_social_media import set_init_script
 from utils.log import bilibili_logger
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
@@ -49,6 +50,15 @@ async def _push_tencent_qrcode_to_status_queue(qrcode_info, status_queue):
     image_data_url = qrcode_info.get("image_data_url") if qrcode_info else ""
     if image_data_url:
         print("视频号二维码地址:", image_data_url)
+        status_queue.put(image_data_url)
+
+
+async def _push_wechatmp_qrcode_to_status_queue(qrcode_info, status_queue):
+    """把主线微信公众号登录流程产出的二维码透传给历史 Web SSE 队列。"""
+
+    image_data_url = qrcode_info.get("image_data_url") if qrcode_info else ""
+    if image_data_url:
+        print("微信公众号二维码地址:", image_data_url)
         status_queue.put(image_data_url)
 
 
@@ -271,6 +281,34 @@ async def get_tencent_cookie(id, status_queue, cancel_event=None, session_id: st
         status_queue,
     )
     _save_user_info_record(2, account_file.name, id)
+    status_queue.put("200")
+    return account_file
+
+
+async def get_wechatmp_cookie(id, status_queue):
+    """历史 Web 微信公众号登录入口，复用主线扫码流程并沿用既有账号落库方式。"""
+
+    uuid_v1 = uuid.uuid1()
+    print(f"UUID v1: {uuid_v1}")
+
+    cookies_dir = Path(BASE_DIR / "cookiesFile")
+    cookies_dir.mkdir(exist_ok=True)
+    account_file = cookies_dir / f"{uuid_v1}.json"
+
+    result = await mainline_wechatmp_cookie_gen(
+        str(account_file),
+        qrcode_callback=lambda qrcode_info: _push_wechatmp_qrcode_to_status_queue(
+            qrcode_info, status_queue
+        ),
+        # 公众号登录与视频号一样更依赖真实浏览器环境，这里统一强制有头模式。
+        headless=False,
+    )
+
+    if not result.get("success"):
+        _push_login_error(status_queue, result.get("message", "微信公众号登录失败"))
+        return None
+
+    _save_user_info_record(6, account_file.name, id)
     status_queue.put("200")
     return account_file
 

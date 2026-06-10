@@ -58,6 +58,79 @@ class PublishEndpointTests(unittest.TestCase):
         self.assertIn("不支持图文发布", response.get_json()["msg"])
         mock_post_note.assert_not_called()
 
+    def test_post_video_dispatches_wechatmp_note_for_image_text_content(self):
+        """微信公众号图文发布应走独立图文 uploader，避免误落到其他平台链路。"""
+
+        payload = {
+            "type": 6,
+            "contentType": "image_text",
+            "baseFields": {
+                "title": "公众号图文标题",
+                "noteContent": "公众号图文正文",
+                "tags": ["公众号", "测试"],
+            },
+            "fileList": ["cover.png", "detail-1.png"],
+            "accountList": ["wechatmp_creator.json"],
+        }
+
+        with patch("myUtils.web_publish.post_note_wechatmp") as mock_post_note:
+            response = self.client.post("/postVideo", json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["code"], 200)
+        mock_post_note.assert_called_once_with(
+            "公众号图文标题",
+            ["cover.png", "detail-1.png"],
+            "公众号图文正文",
+            ["公众号", "测试"],
+            ["wechatmp_creator.json"],
+        )
+
+    def test_post_video_rejects_wechatmp_video_request(self):
+        """微信公众号当前只支持图文，收到视频请求时必须明确拒绝。"""
+
+        payload = {
+            "type": 6,
+            "contentType": "video",
+            "baseFields": {
+                "title": "公众号视频标题",
+            },
+            "fileList": ["video-a.mp4"],
+            "accountList": ["wechatmp_creator.json"],
+        }
+
+        with patch("myUtils.web_publish.post_video_tencent") as mock_post_video:
+            response = self.client.post("/postVideo", json=payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("仅支持图文发布", response.get_json()["msg"])
+        mock_post_video.assert_not_called()
+
+    def test_post_video_rejects_wechatmp_scheduled_image_text_request(self):
+        """微信公众号当前不支持定时发布，避免前端误以为定时配置已经生效。"""
+
+        payload = {
+            "type": 6,
+            "contentType": "image_text",
+            "baseFields": {
+                "title": "公众号图文标题",
+                "noteContent": "公众号图文正文",
+                "enableTimer": 1,
+                "videosPerDay": 1,
+                "dailyTimes": ["10:00"],
+                "startDays": 0,
+            },
+            "fileList": ["cover.png"],
+            "accountList": ["wechatmp_creator.json"],
+        }
+
+        with patch("myUtils.web_publish.post_note_wechatmp") as mock_post_note:
+            response = self.client.post("/postVideo", json=payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("不支持定时发布", response.get_json()["msg"])
+        mock_post_note.assert_not_called()
+
     def test_post_video_accepts_tencent_video_with_base_and_platform_fields(self):
         """统一请求结构中的基础字段和视频号增强字段应被历史接口接受。"""
 

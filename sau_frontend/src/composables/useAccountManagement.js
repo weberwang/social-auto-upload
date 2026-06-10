@@ -544,6 +544,13 @@ export function useAccountManagement() {
   })
 
   /**
+   * 微信公众号账号过滤单独收口，避免账号管理页再写一套行内过滤表达式。
+   */
+  const filteredWechatmpAccounts = computed(() => {
+    return filteredAccounts.value.filter((account) => account.platform === '微信公众号')
+  })
+
+  /**
    * B 站当前只补展示链路与基础编辑能力，便于和 CLI 主线共存。
    */
   const filteredBilibiliAccounts = computed(() => {
@@ -592,6 +599,7 @@ export function useAccountManagement() {
     filteredBilibiliAccounts,
     filteredDouyinAccounts,
     filteredKuaishouAccounts,
+    filteredWechatmpAccounts,
     filteredXiaohongshuAccounts,
     getDefaultAvatar,
     getPlatformTagType,

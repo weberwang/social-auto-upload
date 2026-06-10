@@ -76,6 +76,7 @@ utils_log_stub.tencent_logger = logger_stub
 utils_log_stub.kuaishou_logger = logger_stub
 utils_log_stub.douyin_logger = logger_stub
 utils_log_stub.xhs_logger = logger_stub
+utils_log_stub.wechatmp_logger = logger_stub
 sys.modules.setdefault("utils.log", utils_log_stub)
 
 import myUtils.login as legacy_login

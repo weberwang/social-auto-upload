@@ -7,6 +7,7 @@ from myUtils.bilibili_web_bridge import post_video_bilibili
 from myUtils.postVideo import (
     post_note_DouYin,
     post_note_ks,
+    post_note_wechatmp,
     post_note_xhs,
     post_video_DouYin,
     post_video_ks,
@@ -16,13 +17,14 @@ from myUtils.postVideo import (
 
 VIDEO_CONTENT_TYPE: Final = "video"
 IMAGE_TEXT_CONTENT_TYPE: Final = "image_text"
-SUPPORTED_IMAGE_TEXT_PLATFORM_TYPES: Final[frozenset[int]] = frozenset({1, 3, 4})
+SUPPORTED_IMAGE_TEXT_PLATFORM_TYPES: Final[frozenset[int]] = frozenset({1, 3, 4, 6})
 PLATFORM_NAME_BY_TYPE: Final[dict[int, str]] = {
     1: "小红书",
     2: "视频号",
     3: "抖音",
     4: "快手",
     5: "B站",
+    6: "微信公众号",
 }
 
 ContentType = Literal["video", "image_text"]
@@ -299,7 +301,12 @@ def validate_web_publish_request(publish_request: WebPublishRequest) -> None:
         if publish_request.platform_type not in SUPPORTED_IMAGE_TEXT_PLATFORM_TYPES:
             platform_name = PLATFORM_NAME_BY_TYPE[publish_request.platform_type]
             raise PublishRequestError(f"{platform_name} 当前不支持图文发布")
+        if publish_request.platform_type == 6 and bool(publish_request.enable_timer):
+            raise PublishRequestError("微信公众号当前不支持定时发布")
         return
+
+    if publish_request.platform_type == 6:
+        raise PublishRequestError("微信公众号当前仅支持图文发布")
 
     if publish_request.platform_type == 5 and publish_request.tid is None:
         raise PublishRequestError("B站分区ID不能为空")
@@ -441,6 +448,14 @@ def dispatch_image_text_request(publish_request: WebPublishRequest) -> None:
                 publish_request.videos_per_day,
                 list(publish_request.daily_times),
                 publish_request.start_days,
+            )
+        case 6:
+            post_note_wechatmp(
+                publish_request.title,
+                list(publish_request.file_list),
+                publish_request.note_content,
+                list(publish_request.tags),
+                list(publish_request.account_list),
             )
         case _:
             platform_name = PLATFORM_NAME_BY_TYPE[publish_request.platform_type]

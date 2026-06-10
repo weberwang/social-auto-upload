@@ -20,7 +20,7 @@ from myUtils.material_records import (
 from flask import Flask, request, jsonify, Response, render_template, send_from_directory, g
 from werkzeug.utils import secure_filename
 from conf import BASE_DIR
-from myUtils.login import bilibili_cookie_gen, get_tencent_cookie, douyin_cookie_gen, get_ks_cookie, xiaohongshu_cookie_gen
+from myUtils.login import bilibili_cookie_gen, get_tencent_cookie, get_wechatmp_cookie, douyin_cookie_gen, get_ks_cookie, xiaohongshu_cookie_gen
 from myUtils.publish_drafts import (
     PublishDraftError,
     delete_publish_draft,
@@ -562,7 +562,7 @@ def delete_account():
 # SSE 登录接口
 @app.route('/login')
 def login():
-    # 1 小红书 2 视频号 3 抖音 4 快手 5 B站
+    # 1 小红书 2 视频号 3 抖音 4 快手 5 B站 6 微信公众号
     type = request.args.get('type')
     # 账号名
     id = request.args.get('id')
@@ -932,6 +932,11 @@ def run_async_function(type,id,status_queue,cancel_event,session_id):
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(bilibili_cookie_gen(id, status_queue))
+                loop.close()
+            case '6':
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(get_wechatmp_cookie(id, status_queue))
                 loop.close()
         if cancel_event.is_set():
             print(f"[LOGIN] 登录线程结束: session_id={session_id}, status=cancelled", flush=True)

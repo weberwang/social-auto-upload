@@ -26,6 +26,7 @@ utils_log_stub.bilibili_logger = logger_stub
 utils_log_stub.kuaishou_logger = logger_stub
 utils_log_stub.douyin_logger = logger_stub
 utils_log_stub.xhs_logger = logger_stub
+utils_log_stub.wechatmp_logger = logger_stub
 sys.modules.setdefault("utils.log", utils_log_stub)
 
 base_social_media_stub = types.ModuleType("utils.base_social_media")

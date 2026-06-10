@@ -6,6 +6,7 @@ from conf import BASE_DIR
 from uploader.douyin_uploader.main import DouYinNote, DouYinVideo
 from uploader.ks_uploader.main import KSNote, KSVideo
 from uploader.tencent_uploader.main import TencentVideo
+from uploader.wechatmp_uploader.main import WeChatMpArticle
 from uploader.xiaohongshu_uploader.main import XiaoHongShuNote, XiaoHongShuVideo
 from utils.constant import TencentZoneTypes
 from utils.files_times import generate_schedule_time_next_day
@@ -364,5 +365,28 @@ def post_note_xhs(
             publish_date=publish_datetime,
             account_file=str(cookie),
             location=location,
+        )
+        asyncio.run(app.main(), debug=False)
+
+
+def post_note_wechatmp(
+    title,
+    files,
+    note,
+    tags,
+    account_file,
+):
+    """把微信公众号图文请求分发到公众号 uploader。"""
+
+    cookie_files = _resolve_account_files(account_file)
+    image_files = [str(path) for path in _resolve_material_files(files)]
+
+    for cookie in cookie_files:
+        app = WeChatMpArticle(
+            image_paths=image_files,
+            title=title,
+            note=note,
+            tags=tags,
+            account_file=str(cookie),
         )
         asyncio.run(app.main(), debug=False)

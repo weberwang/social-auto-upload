@@ -11,9 +11,10 @@ from conf import BASE_DIR, LOCAL_CHROME_HEADLESS
 from myUtils.bilibili_web_bridge import check_bilibili_account_file
 from uploader.douyin_uploader.main import cookie_auth as mainline_douyin_cookie_auth
 from uploader.tencent_uploader.main import cookie_auth as mainline_tencent_cookie_auth
-from utils.base_social_media import set_init_script
-from utils.log import tencent_logger, kuaishou_logger, douyin_logger, xhs_logger
+from uploader.wechatmp_uploader.main import cookie_auth as mainline_wechatmp_cookie_auth
 from uploader.xhs_uploader.main import sign_local
+from utils.base_social_media import set_init_script
+from utils.log import wechatmp_logger, tencent_logger, kuaishou_logger, douyin_logger, xhs_logger
 
 
 def _is_missing_playwright_browser_error(error: PlaywrightError) -> bool:
@@ -55,6 +56,12 @@ async def cookie_auth_tencent(account_file):
     """复用主线视频号 Cookie 校验器，确保登录与账号列表共享同一套浏览器策略。"""
 
     return await mainline_tencent_cookie_auth(account_file)
+
+
+async def cookie_auth_wechatmp(account_file):
+    """复用主线微信公众号 Cookie 校验器，避免历史 Web 与主线判断分叉。"""
+
+    return await mainline_wechatmp_cookie_auth(account_file)
 
 
 async def cookie_auth_ks(account_file):
@@ -123,6 +130,9 @@ async def check_cookie(type, file_path):
         case 5:
             # B站校验不依赖 Playwright，而是直接走 biliup renew，因此单独用同步桥接函数。
             return check_bilibili_account_file(file_path)
+        # 微信公众号
+        case 6:
+            return await _run_cookie_validator(cookie_auth_wechatmp, account_file, wechatmp_logger, "微信公众号")
         case _:
             return False
 

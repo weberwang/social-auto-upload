@@ -50,6 +50,13 @@ export const PUBLISH_PLATFORM_OPTIONS = [
     supportedMaterialTypes: ['视频'],
     supportedContentTypes: [PUBLISH_CONTENT_TYPE_VIDEO],
     materialSupportDescription: `当前主线仅支持视频素材发布，视频格式支持 ${VIDEO_FILE_FORMAT_TEXT}。`
+  },
+  {
+    key: 6,
+    name: '微信公众号',
+    supportedMaterialTypes: ['图文'],
+    supportedContentTypes: [PUBLISH_CONTENT_TYPE_IMAGE_TEXT],
+    materialSupportDescription: `当前主线支持图文草稿发布，图片格式支持 ${IMAGE_FILE_FORMAT_TEXT}。`
   }
 ]
 
@@ -61,7 +68,8 @@ export const PUBLISH_ACCOUNT_PLATFORM_BY_KEY = {
   2: '视频号',
   3: '抖音',
   4: '快手',
-  5: 'B站'
+  5: 'B站',
+  6: '微信公众号'
 }
 
 /**
