@@ -6,7 +6,9 @@ param(
     [string]$WaitPortScript,
 
     [Parameter(Mandatory = $true)]
-    [int]$BackendPort
+    [int]$BackendPort,
+
+    [int]$BackendReadyTimeoutSeconds = 120
 )
 
 $projectFrontendDir = [System.IO.Path]::GetFullPath($FrontendDir)
@@ -48,11 +50,13 @@ $waitProcess = Start-Process -FilePath "powershell.exe" -ArgumentList @(
     "-ExecutionPolicy", "Bypass",
     "-File", $WaitPortScript,
     "-Port", $BackendPort,
-    "-TimeoutSeconds", "30"
+    "-TimeoutSeconds", $BackendReadyTimeoutSeconds.ToString()
 ) -PassThru -Wait -NoNewWindow
 
 if ($waitProcess.ExitCode -ne 0) {
-    Write-Warning "Backend was not confirmed within 30 seconds. Frontend will still start."
+    # 后端未就绪时直接终止前端启动，避免页面首屏请求触发一串代理拒绝连接错误。
+    Write-Error "后端在 $BackendReadyTimeoutSeconds 秒内未就绪，已取消前端启动，请先检查当前窗口里的后端日志。"
+    exit 1
 }
 
 Stop-StaleFrontendProcesses -FrontendDir $projectFrontendDir
