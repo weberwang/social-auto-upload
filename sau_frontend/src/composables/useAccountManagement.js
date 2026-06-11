@@ -6,6 +6,7 @@ import { useAccountStore } from '../stores/account.js'
 import { useAppStore } from '../stores/app.js'
 import { http } from '../utils/request.js'
 import { bootstrapAccountManagementPage } from './accountManagementBootstrap.js'
+import { parseAccountLoginSseMessage } from './accountManagementSseMessage.js'
 import { createAccountFetchCoordinator } from './accountFetchCoordinator.js'
 import {
   ACCOUNT_PLATFORM_SSE_LOGIN_SUPPORTED_LABELS,
@@ -367,9 +368,10 @@ export function useAccountManagement() {
     eventSource.onmessage = (event) => {
       const data = event.data
       console.debug('[账号登录][SSE] 收到消息', { platform, name, data })
+      const parsedMessage = parseAccountLoginSseMessage(data, Boolean(qrCodeData.value))
 
-      if (data.startsWith('SESSION:')) {
-        loginSessionId.value = data.slice('SESSION:'.length).trim()
+      if (parsedMessage.type === 'session') {
+        loginSessionId.value = parsedMessage.sessionId
         console.info('[账号登录][SSE] 收到会话标识', {
           platform,
           name,
@@ -378,15 +380,18 @@ export function useAccountManagement() {
         return
       }
 
-      if (!qrCodeData.value && data.length > 100) {
+      if (parsedMessage.type === 'log') {
+        console.debug('[账号登录][SSE][调试]', parsedMessage.message)
+        return
+      }
+
+      if (parsedMessage.type === 'qrcode') {
         try {
-          qrCodeData.value = data.startsWith('data:image')
-            ? data
-            : `data:image/png;base64,${data}`
+          qrCodeData.value = parsedMessage.src
           console.info('[账号登录][SSE] 已更新二维码展示', {
             platform,
             name,
-            payloadLength: data.length
+            payloadLength: parsedMessage.raw.length
           })
         } catch (error) {
           console.error('处理二维码数据失败:', error)
@@ -394,13 +399,8 @@ export function useAccountManagement() {
         return
       }
 
-      if (data.startsWith('LOG:')) {
-        console.debug('[账号登录][SSE][调试]', data)
-        return
-      }
-
-      if (data.startsWith('ERROR:')) {
-        loginErrorMessage.value = data.slice('ERROR:'.length).trim()
+      if (parsedMessage.type === 'error') {
+        loginErrorMessage.value = parsedMessage.message
         console.warn('[账号登录][SSE] 收到错误消息', {
           platform,
           name,
@@ -409,20 +409,20 @@ export function useAccountManagement() {
         return
       }
 
-      if (data === 'CANCELLED') {
+      if (parsedMessage.type === 'cancelled') {
         console.info('[账号登录][SSE] 会话已取消', { platform, name, sessionId: loginSessionId.value })
         closeSSEConnection()
         resetLoginFlowState()
         return
       }
 
-      if (data !== '200' && data !== '500') {
+      if (parsedMessage.type !== 'terminal') {
         return
       }
 
-      loginStatus.value = data
-      console.info('[账号登录][SSE] 收到终态', { platform, name, status: data })
-      if (data === '200') {
+      loginStatus.value = parsedMessage.status
+      console.info('[账号登录][SSE] 收到终态', { platform, name, status: parsedMessage.status })
+      if (parsedMessage.status === '200') {
         setTimeout(() => {
           closeSSEConnection()
 

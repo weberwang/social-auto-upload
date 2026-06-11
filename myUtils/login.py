@@ -58,8 +58,26 @@ async def _push_wechatmp_qrcode_to_status_queue(qrcode_info, status_queue):
 
     image_data_url = qrcode_info.get("image_data_url") if qrcode_info else ""
     if image_data_url:
+        image_path = str(qrcode_info.get("image_path") or "")
+        payload_length = int(qrcode_info.get("payload_length") or len(image_data_url))
+        image_byte_size = int(qrcode_info.get("image_byte_size") or 0)
+        debug_message = (
+            "LOG:微信公众号:qr_ready:"
+            f"path={image_path};payload_length={payload_length};image_bytes={image_byte_size}"
+        )
+        # 先把二维码载荷元数据透传给前端控制台，方便判断是“没生成”还是“生成了但没展示”。
+        print(f"微信公众号二维码调试事件: {debug_message}")
+        status_queue.put(debug_message)
         print("微信公众号二维码地址:", image_data_url)
         status_queue.put(image_data_url)
+
+
+def _push_wechatmp_debug_to_status_queue(status_queue, stage: str, detail: str) -> None:
+    """把公众号登录桥接层的关键阶段透传到历史 Web SSE，方便前端控制台对照时序。"""
+
+    debug_message = f"LOG:微信公众号:{stage}:{detail}"
+    print(f"微信公众号调试事件: {debug_message}")
+    status_queue.put(debug_message)
 
 
 async def _push_tencent_debug_to_status_queue(status_event, status_queue):
@@ -294,6 +312,11 @@ async def get_wechatmp_cookie(id, status_queue):
     cookies_dir = Path(BASE_DIR / "cookiesFile")
     cookies_dir.mkdir(exist_ok=True)
     account_file = cookies_dir / f"{uuid_v1}.json"
+    _push_wechatmp_debug_to_status_queue(
+        status_queue,
+        "legacy_login_start",
+        f"account={id};account_file={account_file.name}",
+    )
 
     result = await mainline_wechatmp_cookie_gen(
         str(account_file),
@@ -302,6 +325,15 @@ async def get_wechatmp_cookie(id, status_queue):
         ),
         # 公众号登录与视频号一样更依赖真实浏览器环境，这里统一强制有头模式。
         headless=False,
+    )
+
+    _push_wechatmp_debug_to_status_queue(
+        status_queue,
+        "legacy_login_result",
+        (
+            f"success={bool(result.get('success'))};status={result.get('status')};"
+            f"message={result.get('message')}"
+        ),
     )
 
     if not result.get("success"):

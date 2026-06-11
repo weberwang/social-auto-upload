@@ -182,22 +182,79 @@ async def _fill_first_visible(page: Page, selectors: tuple[str, ...], value: str
 async def _ensure_scan_mode(page: Page) -> None:
     """公众号登录页默认可能停在账号密码登录，这里统一切到扫码模式。"""
 
+    if await _has_visible_selector(page, (WECHATMP_LOGIN_QRCODE_SELECTORS[0],)):
+        wechatmp_logger.info(_msg("🔎", "当前页面已经处于扫码模式，跳过扫码入口切换"))
+        return
+
     scan_switch = page.locator("a.login__type__container__select-type__scan").first
-    if await scan_switch.count():
+    if await scan_switch.count() and await scan_switch.is_visible():
         await scan_switch.click()
+        wechatmp_logger.info(_msg("🔁", "检测到账号密码登录态，已切换到扫码模式"))
         await asyncio.sleep(1)
+        return
+
+    wechatmp_logger.info(_msg("⚠️", "未找到可见的扫码切换入口，继续按当前页面模式尝试定位二维码"))
 
 
 async def _capture_qrcode_locator(locator, output_path: Path) -> dict[str, str]:
     """把二维码元素截图成文件和 data URL，统一供前端与终端复用。"""
 
+    # 公众号登录页的二维码会先渲染占位 img，再异步回填真实位图；这里必须等图片真正解码完成，
+    # 否则前端虽然能收到 data URL，但看到的会是一张空白 PNG。
+    image_ready = {"complete": False, "naturalWidth": 0, "naturalHeight": 0}
+    for attempt in range(30):
+        image_ready = await locator.evaluate(
+            """node => ({
+                complete: Boolean(node && node.complete),
+                naturalWidth: Number(node && node.naturalWidth || 0),
+                naturalHeight: Number(node && node.naturalHeight || 0)
+            })"""
+        )
+        if image_ready["complete"] and image_ready["naturalWidth"] > 0 and image_ready["naturalHeight"] > 0:
+            wechatmp_logger.info(
+                _msg(
+                    "🔎",
+                    (
+                        "二维码图片已就绪，"
+                        f"attempt={attempt + 1}, width={image_ready['naturalWidth']}, "
+                        f"height={image_ready['naturalHeight']}"
+                    ),
+                )
+            )
+            break
+        if attempt in {0, 4, 9, 19, 29}:
+            wechatmp_logger.info(
+                _msg(
+                    "⏳",
+                    (
+                        "等待二维码位图加载完成，"
+                        f"attempt={attempt + 1}, complete={image_ready['complete']}, "
+                        f"width={image_ready['naturalWidth']}, height={image_ready['naturalHeight']}"
+                    ),
+                )
+            )
+        await asyncio.sleep(0.2)
+
     image_bytes = await locator.screenshot(type="png")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(image_bytes)
     encoded = base64.b64encode(image_bytes).decode("ascii")
+    wechatmp_logger.info(
+        _msg(
+            "🧪",
+            (
+                "二维码截图采集完成，"
+                f"image_bytes={len(image_bytes)}, payload_length={len(encoded) + len('data:image/png;base64,')}, "
+                f"path={output_path}"
+            ),
+        )
+    )
     return {
         "image_path": str(output_path),
         "image_data_url": f"data:image/png;base64,{encoded}",
+        # 这些字段专供历史 Web 的 SSE 调试日志透传，帮助区分“截图为空”和“前端展示失败”。
+        "payload_length": len(encoded) + len("data:image/png;base64,"),
+        "image_byte_size": len(image_bytes),
     }
 
 
@@ -210,11 +267,13 @@ async def _save_wechatmp_qrcode(
     """截图保存公众号登录二维码，并把可展示结果回调给上层。"""
 
     await _ensure_scan_mode(page)
+    wechatmp_logger.info(_msg("🔎", f"准备定位公众号二维码元素，当前页面: {page.url}"))
     qrcode_locator = page.locator(WECHATMP_LOGIN_QRCODE_SELECTORS[0]).first
     if not await qrcode_locator.count():
         for selector in WECHATMP_LOGIN_QRCODE_SELECTORS[1:]:
             candidate = page.locator(selector).first
             if await candidate.count():
+                wechatmp_logger.info(_msg("🔁", f"主选择器未命中，回退到候选选择器: {selector}"))
                 qrcode_locator = candidate
                 break
 
